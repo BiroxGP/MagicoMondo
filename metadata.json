@@ -1,0 +1,6 @@
+{
+  "name": "MAGICO MONDO - Generatore PG-PNG",
+  "description": "Generatore di personaggi, schede stampabili ad-hoc e scheda vuota per il Gioco di Ruolo Magico Mondo.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
