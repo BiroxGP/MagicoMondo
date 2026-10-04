@@ -477,8 +477,8 @@ function mmOutcome(r,target,raises){
 const crit=r===1,cf=r===20,ok=crit||(!cf&&r<=target);
 const succ=["✅ **Riesce.** L'azione va a buon fine.","✅ **Riesce bene** (1 raise): lo fa con stile.","✅ **Riesce molto bene** (2 raise): un'esecuzione davvero notevole.","✅ **Riesce in modo incredibile** (3 raise): una prova che verrà ricordata a lungo."];
 const critS=["🌟 **SUCCESSO CRITICO!** Un colpo di genio: riesce alla grande.","🌟 **SUCCESSO CRITICO** con 1 raise: riesce in modo eccezionale.","🌟 **SUCCESSO CRITICO** con 2 raise: un'impresa straordinaria, tutti rimangono a bocca aperta.","🌟🌟 **SUCCESSO INCREDIBILE!** Critico con 3 raise: un'impresa leggendaria, da raccontare per generazioni."];
-const text=crit?critS[Math.min(3,raises)]:cf?"💀 **INSUCCESSO CRITICO!** Sbaglia clamorosamente"+(raises>=2?", proprio mentre tentava un'impresa così ardita.":"."):ok?succ[Math.min(3,raises)]:raises>=1?"❌ **Fallisce.** Puntava in alto con "+raises+" raise, ma stavolta non ce la fa.":"❌ **Fallisce.** Non ci riesce, stavolta.";
-return{ok,crit,cf,text,color:crit?16766720:cf?10038562:ok?3066993:15158332,short:crit?"🌟 Successo critico":cf?"💀 Insuccesso critico":ok?"✅ Riuscito":"❌ Fallito"}
+const text=crit?critS[Math.min(3,raises)]:cf?(raises>=3?"💀💀 **TRAGEDIA!** Insuccesso critico con 3 raise: voleva fare l'impresa perfetta e finisce nel disastro più totale.":"💀 **INSUCCESSO CRITICO!** Sbaglia clamorosamente"+(raises>=2?", proprio mentre tentava un'impresa così ardita.":".")):ok?succ[Math.min(3,raises)]:raises>=1?"❌ **Fallisce.** Puntava in alto con "+raises+" raise, ma stavolta non ce la fa.":"❌ **Fallisce.** Non ci riesce, stavolta.";
+return{ok,crit,cf,text,color:crit?16766720:cf?10038562:ok?3066993:15158332,short:crit?"🌟 Successo critico":cf?(raises>=3?"💀 Tragedia":"💀 Insuccesso critico"):ok?"✅ Riuscito":"❌ Fallito"}
 }
 function SkillRollModal({character:o,skill:sk,onClose}){
 const free=Math.min(3,Vp(sk.name,sk.attr,o)),[raises,setRaises]=Se.useState(free),[res,setRes]=Se.useState(null),[st,setSt]=Se.useState(""),attrV=(o.attributes&&o.attributes[sk.attr])||0,paid=raises-free,target=attrV+sk.value-2*paid,
