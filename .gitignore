@@ -4,3 +4,4 @@ dist
 *.local
 .claude/settings.local.json
 Immagini/
+.data
