@@ -87,10 +87,7 @@ export default async function handler(req, res) {
   const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || 'unknown';
   if (limited(hits, ip, 240, 60_000)) return res.status(429).json({ error: 'rate_limited' });
 
-  if (storeKind() === 'none') {
-    const names = Object.keys(process.env).filter((k) => /redis|kv_|upstash|storage/i.test(k));
-    return res.status(503).json({ error: 'not_configured', envNames: names });
-  }
+  if (storeKind() === 'none') return res.status(503).json({ error: 'not_configured' });
 
   const method = req.method;
   const query = req.query || {};
