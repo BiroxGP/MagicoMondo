@@ -80,6 +80,24 @@ function cleanTokens(list) {
   });
 }
 
+// Effetti di gioco (aree di spell, ecc.): cerchi o quadrati con un testo, grandi quanto vuole il master.
+function cleanEffects(list) {
+  if (!Array.isArray(list)) return [];
+  return list.slice(0, 80).map((e, n) => {
+    const ef = e && typeof e === 'object' ? e : {};
+    return {
+      id: text(ef.id, 40) || 'e' + n,
+      label: text(ef.label, 40),
+      shape: ef.shape === 'square' ? 'square' : 'circle',
+      color: COLOR_RE.test(ef.color || '') ? ef.color : '#ef4444',
+      opacity: num(ef.opacity, 0.05, 0.9, 0.35),
+      radius: num(ef.radius, 0.2, 500, 3),
+      x: num(ef.x, -5000, 20000, 0),
+      y: num(ef.y, -5000, 20000, 0),
+    };
+  });
+}
+
 const publicOf = (rec) => ({
   id: rec.id,
   name: rec.name,
@@ -88,6 +106,7 @@ const publicOf = (rec) => ({
   bg: rec.bg || null,
   grid: rec.grid,
   tokens: rec.tokens,
+  effects: rec.effects || [],
 });
 
 async function isMaster(token) {
@@ -243,6 +262,7 @@ export default async function handler(req, res) {
         bg: null,
         grid: { ...DEFAULT_GRID },
         tokens: [],
+        effects: [],
       };
       await saveBoard(rec);
       if (!(await kGet(PUBLIC))) await kSet(PUBLIC, JSON.stringify(publicOf(rec)));
@@ -259,6 +279,7 @@ export default async function handler(req, res) {
         name: text(st.name, 60) || rec.name,
         grid: cleanGrid(st.grid),
         tokens: cleanTokens(st.tokens),
+        effects: cleanEffects(st.effects),
         rev: rec.rev + 1,
         updatedAt: Date.now(),
       };
