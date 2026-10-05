@@ -516,8 +516,8 @@ return i.jsx("span",{style:{background:t[0],color:t[1],border:"1px solid "+t[1]+
 function MmTopBar({onMenu,title}){
 return i.jsx("header",{className:"bg-slate-950/95 backdrop-blur-md border-b border-amber-600/30 text-slate-100 sticky top-0 z-40 shadow-2xl print:hidden",children:i.jsxs("div",{className:"max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5 flex items-center justify-between gap-3",children:[i.jsxs("div",{className:"flex items-center gap-3",children:[i.jsx("div",{className:"relative w-11 h-11 rounded-xl overflow-hidden border-2 border-amber-500/60 shadow-lg shrink-0",children:i.jsx("img",{src:"/images/magico_mondo_crest.jpg",alt:"Magico Mondo Crest",className:"w-full h-full object-cover transform scale-105",referrerPolicy:"no-referrer"})}),i.jsx("h1",{className:"text-lg sm:text-xl font-cinzel font-black tracking-widest text-amber-200 uppercase drop-shadow-md",children:"Magico Mondo"}),title&&i.jsx("span",{className:"text-xs font-bold tracking-widest text-amber-400/90 uppercase",children:title})]}),onMenu&&i.jsx("button",{onClick:onMenu,className:"px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-amber-300 text-xs font-bold rounded-xl border border-slate-700 cursor-pointer",children:"⌂ Menu"})]})})
 }
-function MmMenu({onCreate,onPlay,onDice}){
-const items=[["⚒","Crea PG","Apri il generatore e crea i tuoi personaggi, con tutta la creazione fino in fondo. I PG che crei restano in una lista locale (solo su questo dispositivo) finché non li rendi ufficiali.",onCreate],["⚔","Gioca","Scegli un PG ufficiale da giocare, vedere o stampare. I PG ufficiali sono quelli da usare in gioco e li puoi caricare da qualsiasi dispositivo. Per giocare serve almeno un PG ufficiale.",onPlay],["🎲","Dadi","Tira d20, d6, d10 e d100 senza usare un PG ufficiale.",onDice]];
+function MmMenu({onCreate,onPlay,onDice,onBoard}){
+const items=[["⚒","Crea PG","Apri il generatore e crea i tuoi personaggi, con tutta la creazione fino in fondo. I PG che crei restano in una lista locale (solo su questo dispositivo) finché non li rendi ufficiali.",onCreate],["⚔","Gioca","Scegli un PG ufficiale da giocare, vedere o stampare. I PG ufficiali sono quelli da usare in gioco e li puoi caricare da qualsiasi dispositivo. Per giocare serve almeno un PG ufficiale.",onPlay],["🎲","Dadi","Tira d20, d6, d10 e d100 senza usare un PG ufficiale.",onDice],["🗺","Lavagna","Mappa condivisa con griglia e pedine per i combattimenti: la vedono tutti i collegati, la muove solo il master.",onBoard]];
 return i.jsxs("div",{style:{maxWidth:"920px",margin:"0 auto"},className:"space-y-6 py-6",children:[i.jsxs("div",{className:"text-center space-y-1",children:[i.jsx("h2",{className:"text-xl font-bold text-amber-200",children:"Cosa vuoi fare?"}),i.jsx("p",{className:"text-xs text-slate-400",children:"Generatore di personaggi, gioco e dadi per il GdR Magico Mondo."})]}),i.jsx("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",gap:"16px"},children:items.map(([ic,t,desc,fn])=>i.jsxs("button",{onClick:fn,className:"bg-slate-900/60 hover:bg-slate-800 border border-slate-800 rounded-2xl p-6 text-left cursor-pointer",style:{color:"#e2e8f0"},children:[i.jsx("div",{style:{fontSize:"34px",lineHeight:1},children:ic}),i.jsx("div",{className:"text-base font-bold text-amber-300 mt-2",children:t}),i.jsx("div",{className:"text-xs text-slate-400 mt-2 leading-relaxed",children:desc})]},t))})]})
 }
 function MmLocal({character,onChange,onBack}){return i.jsxs("div",{className:"space-y-4 max-w-5xl mx-auto",children:[i.jsx("div",{style:{borderRadius:"12px",padding:"10px 14px",fontSize:"12px",background:"rgba(120,53,15,0.35)",border:"1px solid rgba(245,158,11,0.5)",color:"#fde68a"},children:"Modalità offline: stai giocando una copia salvata solo su questo dispositivo. Appena il server è raggiungibile rendi ufficiale il PG per ritrovarlo ovunque."}),i.jsx(wx,{character,onChange,onBackToPicker:onBack})]})}
@@ -602,6 +602,198 @@ if(err)return i.jsxs("div",{className:"max-w-2xl mx-auto bg-slate-900/60 border 
 if(!ch)return i.jsx("div",{className:"text-center py-20 text-slate-400",children:"Caricamento della scheda…"});
 return i.jsx(vx,{character:ch,isBlankSheet:blank,onToggleBlank:setBlank,onBack,printGrimoireOnly:gmo,onSetGrimoireOnly:setGmo})
 }
+function mmBoardApi(method,query,body){
+return fetch("/api/board"+(query||""),{method,headers:{"Content-Type":"application/json"},body:body?JSON.stringify(body):void 0}).then(r=>r.json().catch(()=>({})).then(j=>({status:r.status,ok:r.ok,data:j}))).catch(()=>({status:0,ok:false,data:{error:"network"}}))
+}
+function mmBoardErr(r){
+const e=r.data&&r.data.error,m={network:"Server non raggiungibile. Riprova.",not_configured:"Il database non è ancora configurato sul server.",no_master:"La password master non è impostata sul server (variabile GM_PASSWORD su Vercel).",bad_password:"Password master non corretta.",not_master:"Un altro master ha preso il controllo (o la sessione è scaduta): ora sei in sola lettura.",too_many:"Hai già 10 lavagne: eliminane una prima di crearne un'altra.",too_large:"La lavagna o la mappa è troppo pesante da salvare.",bad_image:"Immagine non valida.",rate_limited:"Troppe richieste, aspetta un attimo.",not_found:"Lavagna non trovata."};
+return m[e]||("Errore del server ("+r.status+").")
+}
+function mmHexRgb(h){
+let x=String(h||"#000000").replace("#","");
+if(x.length===3)x=x.split("").map(c=>c+c).join("");
+const n=parseInt(x.slice(0,6),16)||0;
+return((n>>16)&255)+","+((n>>8)&255)+","+(n&255)
+}
+function mmLoadImage(file){
+return new Promise((res,rej)=>{const url=URL.createObjectURL(file),img=new Image;img.onload=()=>{URL.revokeObjectURL(url);res(img)};img.onerror=()=>{URL.revokeObjectURL(url);rej(new Error("Non riesco a leggere questa immagine."))};img.src=url})
+}
+function mmDrawScaled(src,sw,sh,max){
+const k=Math.min(1,max/Math.max(sw,sh)),c=document.createElement("canvas");
+c.width=Math.max(1,Math.round(sw*k));c.height=Math.max(1,Math.round(sh*k));
+const x=c.getContext("2d");x.fillStyle="#fff";x.fillRect(0,0,c.width,c.height);x.drawImage(src,0,0,c.width,c.height);
+return c
+}
+async function mmCanvasToJpeg(canvas){
+const LIMIT=2200000;let c=canvas,q=0.85;
+for(let step=0;step<10;step++){
+const blob=await new Promise(r=>c.toBlob(r,"image/jpeg",q));
+if(blob&&blob.size<=LIMIT)return{blob,w:c.width,h:c.height};
+if(q>0.6)q-=0.1;else{const n=document.createElement("canvas");n.width=Math.round(c.width*0.8);n.height=Math.round(c.height*0.8);n.getContext("2d").drawImage(c,0,0,n.width,n.height);c=n}
+}
+throw new Error("Anche ridotta al massimo questa mappa resta troppo pesante da salvare: prova con un'immagine più semplice o più piccola.")
+}
+function mmBlobToDataUrl(blob){
+return new Promise((res,rej)=>{const r=new FileReader;r.onload=()=>res(r.result);r.onerror=()=>rej(new Error("Lettura del file non riuscita."));r.readAsDataURL(blob)})
+}
+async function mmPdfLib(){
+const lib=await import("pdfjs-dist"),w=await import("pdfjs-dist/build/pdf.worker.min.mjs?url");
+lib.GlobalWorkerOptions.workerSrc=w.default;
+return lib
+}
+async function mmPdfOpen(file){
+const lib=await mmPdfLib(),data=await file.arrayBuffer();
+return lib.getDocument({data}).promise
+}
+async function mmPdfPageCanvas(doc,pageNo){
+const page=await doc.getPage(pageNo),v1=page.getViewport({scale:1}),k=Math.min(4,2000/Math.max(v1.width,v1.height)),vp=page.getViewport({scale:k}),c=document.createElement("canvas");
+c.width=Math.round(vp.width);c.height=Math.round(vp.height);
+const ctx=c.getContext("2d");ctx.fillStyle="#fff";ctx.fillRect(0,0,c.width,c.height);
+await page.render({canvasContext:ctx,viewport:vp}).promise;
+return c
+}
+async function mmTokenImage(file){
+const img=await mmLoadImage(file),c=document.createElement("canvas");
+c.width=c.height=80;
+const s=Math.min(img.width,img.height);
+c.getContext("2d").drawImage(img,(img.width-s)/2,(img.height-s)/2,s,s,0,0,80,80);
+let out=c.toDataURL("image/jpeg",0.65);
+if(out.length>8800)out=c.toDataURL("image/jpeg",0.4);
+return out
+}
+function mmPgColor(id){
+let h=0;for(const ch of String(id))h=(h*31+ch.charCodeAt(0))%360;
+const c=document.createElement("canvas").getContext("2d");c.fillStyle="hsl("+h+",65%,45%)";
+return c.fillStyle
+}
+function MmBoardCanvas({imgUrl,w,h,grid,tokens,zoom,editable,selId,onSelect,onMove,tool}){
+const[drag,setDrag]=Se.useState(null),[ruler,setRuler]=Se.useState(null),ref=Se.useRef(null),gs=grid.size,
+lw=Math.max(1,1.3/zoom),lc="rgba("+mmHexRgb(grid.color)+","+grid.opacity+")",
+gridBg=grid.show?{backgroundImage:"linear-gradient(to right,"+lc+" "+lw+"px,transparent "+lw+"px),linear-gradient(to bottom,"+lc+" "+lw+"px,transparent "+lw+"px)",backgroundSize:gs+"px "+gs+"px",backgroundPosition:grid.ox+"px "+grid.oy+"px"}:{},
+toBoard=e=>{const r=ref.current.getBoundingClientRect();return{x:(e.clientX-r.left)/zoom,y:(e.clientY-r.top)/zoom}},
+rulerOn=tool==="ruler",
+rl=ruler?Math.hypot(ruler.x2-ruler.x1,ruler.y2-ruler.y1)/gs:0;
+return i.jsx("div",{style:{width:w*zoom,height:h*zoom,position:"relative"},children:i.jsxs("div",{ref,style:{position:"absolute",left:0,top:0,width:w,height:h,transform:"scale("+zoom+")",transformOrigin:"0 0",touchAction:rulerOn?"none":"pan-x pan-y",userSelect:"none",cursor:rulerOn?"crosshair":"default"},
+onPointerDown:e=>{if(rulerOn){e.currentTarget.setPointerCapture(e.pointerId);const p=toBoard(e);setRuler({x1:p.x,y1:p.y,x2:p.x,y2:p.y,live:true})}else onSelect(null)},
+onPointerMove:e=>{if(rulerOn&&ruler&&ruler.live){const p=toBoard(e);setRuler({...ruler,x2:p.x,y2:p.y})}},
+onPointerUp:()=>{ruler&&ruler.live&&setRuler({...ruler,live:false})},
+children:[
+imgUrl?i.jsx("img",{src:imgUrl,draggable:false,alt:"Mappa",style:{width:w,height:h,display:"block",pointerEvents:"none"}}):i.jsx("div",{style:{width:w,height:h,background:"#e2e8f0"}}),
+i.jsx("div",{style:{position:"absolute",left:0,top:0,width:w,height:h,pointerEvents:"none",...gridBg}}),
+tokens.map(t=>{const d=drag&&drag.id===t.id,x=d?drag.x:t.x,y=d?drag.y:t.y,sz=gs*t.size,sel=selId===t.id;
+return i.jsxs("div",{key:t.id,title:t.name,
+onPointerDown:e=>{if(rulerOn)return;e.stopPropagation();onSelect(t.id);if(!editable)return;e.currentTarget.setPointerCapture(e.pointerId);const p=toBoard(e);setDrag({id:t.id,dx:p.x-t.x,dy:p.y-t.y,x:t.x,y:t.y})},
+onPointerMove:e=>{if(!drag||drag.id!==t.id)return;const p=toBoard(e);setDrag({...drag,x:p.x-drag.dx,y:p.y-drag.dy})},
+onPointerUp:()=>{if(!drag||drag.id!==t.id)return;let{x,y}=drag;if(grid.snap&&grid.show){x=Math.round((x-grid.ox)/gs)*gs+grid.ox;y=Math.round((y-grid.oy)/gs)*gs+grid.oy}setDrag(null);onMove(t.id,Math.round(x),Math.round(y))},
+style:{position:"absolute",left:x,top:y,width:sz,height:sz,touchAction:editable&&!rulerOn?"none":"auto",cursor:editable&&!rulerOn?(d?"grabbing":"grab"):"default",pointerEvents:rulerOn?"none":"auto",zIndex:d?30:sel?20:10},
+children:[
+i.jsx("div",{style:{width:"100%",height:"100%",boxSizing:"border-box",borderRadius:t.shape==="square"?"6px":"50%",background:t.img?"url("+t.img+") center/cover":t.color,border:(sel?"3px solid #f59e0b":"2px solid #fff"),boxShadow:"0 1px 4px rgba(0,0,0,0.6)",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:800,fontSize:Math.max(10,sz*0.38)+"px",textShadow:"0 1px 2px rgba(0,0,0,0.8)",overflow:"hidden"},children:t.img?null:(t.name||"?").slice(0,2).toUpperCase()}),
+i.jsx("div",{style:{position:"absolute",left:"50%",top:"100%",transform:"translateX(-50%)",marginTop:"1px",background:"rgba(15,23,42,0.85)",color:"#fff",fontSize:Math.max(10,gs*0.26)+"px",padding:"0 4px",borderRadius:"4px",whiteSpace:"nowrap",pointerEvents:"none"},children:t.name})
+]})}),
+ruler&&i.jsxs("svg",{width:w,height:h,style:{position:"absolute",left:0,top:0,pointerEvents:"none",zIndex:40},children:[i.jsx("line",{x1:ruler.x1,y1:ruler.y1,x2:ruler.x2,y2:ruler.y2,stroke:"#dc2626",strokeWidth:Math.max(2,3/zoom),strokeDasharray:"8 6"}),i.jsx("circle",{cx:ruler.x1,cy:ruler.y1,r:Math.max(4,5/zoom),fill:"#dc2626"}),i.jsx("circle",{cx:ruler.x2,cy:ruler.y2,r:Math.max(4,5/zoom),fill:"#dc2626"}),i.jsx("text",{x:(ruler.x1+ruler.x2)/2+8,y:(ruler.y1+ruler.y2)/2-8,fontSize:Math.max(14,16/zoom),fontWeight:800,fill:"#fff",stroke:"#7f1d1d",strokeWidth:Math.max(3,4/zoom),paintOrder:"stroke",children:rl.toFixed(1)+" quadretti · "+(rl*grid.scale).toFixed(1)+" "+grid.unit})]})
+]})})
+}
+function MmNum({label,value,onChange,min,max,step,w}){
+return i.jsxs("label",{style:{display:"flex",flexDirection:"column",gap:"2px",fontSize:"10px",color:"#94a3b8",textTransform:"uppercase"},children:[label,i.jsx("input",{type:"number",value,min,max,step:step||1,onChange:e=>onChange(Number(e.target.value)),style:{...mmField,width:w||"72px",padding:"4px 6px"}})]})
+}
+function MmBoardPage(){
+const[pub,setPub]=Se.useState(null),[pubAt,setPubAt]=Se.useState(""),[token,setToken]=Se.useState(()=>{try{return sessionStorage.getItem("mm_board_token")||""}catch(e){return""}}),[master,setMaster]=Se.useState(!1),[loginOpen,setLoginOpen]=Se.useState(!1),[pw,setPw]=Se.useState(""),[msg,setMsg]=Se.useState(""),[busy,setBusy]=Se.useState(""),
+[boards,setBoards]=Se.useState([]),[activeId,setActiveId]=Se.useState(null),[editId,setEditId]=Se.useState(""),[draft,setDraft]=Se.useState(null),[saveSt,setSaveSt]=Se.useState(""),[selId,setSelId]=Se.useState(null),[zoom,setZoom]=Se.useState(1),[tool,setTool]=Se.useState("move"),[pdfDlg,setPdfDlg]=Se.useState(null),[offList,setOffList]=Se.useState([]),[np,setNp]=Se.useState({name:"",color:"#dc2626",size:1,shape:"circle",img:""}),
+tokRef=Se.useRef(token),editRef=Se.useRef(""),draftRef=Se.useRef(null),timer=Se.useRef(null),wrapRef=Se.useRef(null),fitFor=Se.useRef("");
+tokRef.current=token;
+const lose=()=>{try{sessionStorage.removeItem("mm_board_token")}catch(e){}setToken("");tokRef.current="";setMaster(!1);setMsg("Un altro master ha preso il controllo (o la sessione è scaduta): ora sei in sola lettura.")},
+openBoard=id=>mmBoardApi("GET","?id="+encodeURIComponent(id)).then(r=>{if(r.ok){editRef.current=id;setEditId(id);draftRef.current=r.data;setDraft(r.data);setSelId(null)}else setMsg(mmBoardErr(r))}),
+loadBoards=(prefer)=>mmBoardApi("POST","",{action:"list",token:tokRef.current}).then(r=>{if(r.status===401){lose();return}if(!r.ok){setMsg(mmBoardErr(r));return}setBoards(r.data.boards);setActiveId(r.data.activeId);const pick=prefer||(editRef.current&&r.data.boards.find(b=>b.id===editRef.current)?editRef.current:(r.data.activeId||(r.data.boards[0]&&r.data.boards[0].id)));if(pick)openBoard(pick);else{editRef.current="";setEditId("");setDraft(null);draftRef.current=null}}),
+post=(body)=>mmBoardApi("POST","",{...body,token:tokRef.current}).then(r=>{if(r.status===401&&r.data.error==="not_master")lose();return r}),
+save=()=>{timer.current=null;const d=draftRef.current;if(!d)return;setSaveSt("Salvataggio…");post({action:"save",id:d.id,state:{name:d.name,grid:d.grid,tokens:d.tokens}}).then(r=>{if(r.ok)setSaveSt("Salvato ✓ "+new Date().toLocaleTimeString("it-IT"));else if(r.status!==401)setSaveSt(mmBoardErr(r))})},
+change=patch=>{const d={...draftRef.current,...patch};draftRef.current=d;setDraft(d);timer.current&&clearTimeout(timer.current);timer.current=setTimeout(save,600)},
+setGrid=p=>change({grid:{...draftRef.current.grid,...p}}),
+login=()=>{if(!pw)return;setBusy("Accesso…");mmBoardApi("POST","",{action:"login",password:pw}).then(r=>{setBusy("");if(r.ok&&r.data.token){try{sessionStorage.setItem("mm_board_token",r.data.token)}catch(e){}setToken(r.data.token);tokRef.current=r.data.token;setMaster(!0);setLoginOpen(!1);setPw("");setMsg("")}else setMsg(mmBoardErr(r))})},
+useCanvas=async c=>{setBusy("Comprimo e carico la mappa…");try{const out=await mmCanvasToJpeg(c),dataUrl=await mmBlobToDataUrl(out.blob),r=await post({action:"setBg",id:editRef.current,image:dataUrl,w:out.w,h:out.h});if(r.ok){const d={...draftRef.current,bg:r.data.bg};draftRef.current=d;setDraft(d);fitFor.current="";setMsg("Mappa caricata ("+(out.blob.size/1048576).toFixed(1)+" MB, "+out.w+"×"+out.h+" px).")}else setMsg(mmBoardErr(r))}catch(e){setMsg(e.message)}setBusy("")},
+handleMap=async file=>{
+setMsg("");if(!file||!editRef.current)return;
+const isPdf=file.type==="application/pdf"||file.name.toLowerCase().endsWith(".pdf"),mb=file.size/1048576;
+if(isPdf){
+if(mb>30){setMsg("Questo PDF pesa "+mb.toFixed(1)+" MB: il massimo è 30 MB. Esporta solo la pagina che ti serve e riprova.");return}
+try{setBusy("Apro il PDF…");const doc=await mmPdfOpen(file);setBusy("");if(doc.numPages===1){setBusy("Preparo la pagina…");await useCanvas(await mmPdfPageCanvas(doc,1))}else setPdfDlg({doc,pages:doc.numPages,page:1})}catch(e){setBusy("");setMsg("Non riesco ad aprire questo PDF (potrebbe essere protetto o danneggiato).")}
+return}
+if(!file.type.startsWith("image/")){setMsg("Formato non supportato: usa un'immagine (JPG, PNG, WebP…) o un PDF.");return}
+if(mb>25){setMsg("Questa immagine pesa "+mb.toFixed(1)+" MB: il massimo è 25 MB. Riducila e riprova.");return}
+try{setBusy("Ridimensiono la mappa…");const img=await mmLoadImage(file);if(Math.max(img.width,img.height)>12000){setBusy("");setMsg("L'immagine è enorme ("+img.width+"×"+img.height+" px): il massimo è 12000 px per lato. Riducila e riprova.");return}await useCanvas(mmDrawScaled(img,img.width,img.height,2000))}catch(e){setBusy("");setMsg(e.message)}
+},
+usePdfPage=async()=>{const dlg=pdfDlg;setPdfDlg(null);setBusy("Preparo la pagina…");try{await useCanvas(await mmPdfPageCanvas(dlg.doc,Math.min(dlg.pages,Math.max(1,dlg.page))))}catch(e){setBusy("");setMsg("Non riesco a disegnare questa pagina del PDF.")}},
+addToken=(t)=>{const d=draftRef.current,gs=d.grid.size,n=d.tokens.length,tk={id:"t"+Date.now()+n,name:"",color:"#2563eb",size:1,shape:"circle",x:gs*(2+(n%8)),y:gs*(1+Math.floor(n/8)),...t};change({tokens:[...d.tokens,tk]});setSelId(tk.id)},
+patchToken=(id,p)=>change({tokens:draftRef.current.tokens.map(t=>t.id===id?{...t,...p}:t)}),
+moveToken=(id,x,y)=>patchToken(id,{x,y}),
+fit=(dw)=>{const el=wrapRef.current;if(el&&dw)setZoom(Math.max(0.1,Math.min(1,(el.clientWidth-4)/dw)))};
+// aggiornamento per chi guarda: ogni 2 secondi, solo se la pagina è visibile
+Se.useEffect(()=>{let stop=!1,t;const tick=()=>{if(document.hidden){t=setTimeout(tick,4000);return}mmBoardApi("GET").then(r=>{if(stop)return;if(r.ok){setPub(r.data);setPubAt(new Date().toLocaleTimeString("it-IT"))}t=setTimeout(tick,2000)})};tick();return()=>{stop=!0;clearTimeout(t)}},[]);
+// se c'era già una sessione master in questa scheda del browser, la riprende
+Se.useEffect(()=>{if(token&&!master){mmBoardApi("POST","",{action:"list",token}).then(r=>{if(r.ok){setMaster(!0)}else{try{sessionStorage.removeItem("mm_board_token")}catch(e){}setToken("")}})}},[]);
+Se.useEffect(()=>{if(master){loadBoards();mmApi("GET").then(r=>r.ok&&Array.isArray(r.data.list)&&setOffList(r.data.list))}},[master]);
+const view=master?draft:(pub&&!pub.empty?pub:null),vw=view&&view.bg?view.bg.w:1600,vh=view&&view.bg?view.bg.h:1000,vid=view?view.id+":"+(view.bg?view.bg.v:0):"";
+Se.useEffect(()=>{if(view&&fitFor.current!==vid){fitFor.current=vid;fit(vw)}},[vid,vw]);
+Se.useEffect(()=>()=>{if(timer.current){clearTimeout(timer.current);save()}},[]);
+const imgUrl=view&&view.bg?"/api/board?img="+encodeURIComponent(view.id)+"&v="+view.bg.v:"",
+sel=view&&view.tokens.find(t=>t.id===selId),
+sb="px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer border bg-slate-800 hover:bg-slate-700 text-amber-300 border-slate-700",
+sbOn="px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer border bg-amber-500 text-slate-950 border-amber-300/40",
+panel="bg-slate-900/60 border border-slate-800 rounded-2xl p-3",
+lab={fontSize:"10px",color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.05em"};
+const toolbar=i.jsxs("div",{className:panel,style:{display:"flex",flexWrap:"wrap",alignItems:"center",gap:"8px"},children:[
+i.jsx("button",{onClick:()=>setZoom(z=>Math.max(0.1,+(z-0.1).toFixed(2))),className:sb,children:"−"}),i.jsx("span",{className:"text-xs text-slate-300",style:{minWidth:"44px",textAlign:"center"},children:Math.round(zoom*100)+"%"}),i.jsx("button",{onClick:()=>setZoom(z=>Math.min(3,+(z+0.1).toFixed(2))),className:sb,children:"+"}),i.jsx("button",{onClick:()=>fit(vw),className:sb,children:"Adatta"}),
+i.jsx("button",{onClick:()=>setTool(tool==="ruler"?"move":"ruler"),className:tool==="ruler"?sbOn:sb,title:"Misura le distanze trascinando sulla mappa",children:"📏 Righello"}),
+view&&i.jsx("span",{className:"text-xs text-slate-400",style:{marginLeft:"auto"},children:master?saveSt:("Lavagna «"+view.name+"» · aggiornata alle "+pubAt)}),
+!master&&i.jsx("button",{onClick:()=>setLoginOpen(o=>!o),className:sb,style:{marginLeft:view?"0":"auto"},children:"🔑 Accesso master"})
+]});
+const loginBox=!master&&loginOpen&&i.jsxs("div",{className:panel,style:{display:"flex",gap:"8px",flexWrap:"wrap",alignItems:"center"},children:[i.jsx("input",{type:"password",value:pw,onChange:e=>setPw(e.target.value),onKeyDown:e=>{e.key==="Enter"&&login()},placeholder:"Password master",style:{...mmField,width:"200px"},autoComplete:"off"}),i.jsx("button",{onClick:login,className:sb,children:"Entra"}),i.jsx("span",{className:"text-[11px] text-slate-400",children:"Solo un master alla volta: se ne entra un altro, tu passi in sola lettura."})]});
+const masterBar=master&&i.jsxs("div",{className:panel,style:{display:"flex",flexWrap:"wrap",alignItems:"center",gap:"8px"},children:[
+i.jsx("span",{className:"text-xs font-bold text-emerald-300",children:"🔓 Master"}),
+i.jsx("select",{value:editId,onChange:e=>{if(timer.current){clearTimeout(timer.current);save()}openBoard(e.target.value)},style:{...mmField,width:"auto",maxWidth:"200px"},children:boards.map(b=>i.jsx("option",{value:b.id,children:(b.id===activeId?"★ ":"")+b.name},b.id))}),
+i.jsx("button",{onClick:()=>{const n=prompt("Nome della nuova lavagna:","Lavagna "+(boards.length+1));if(n===null)return;post({action:"create",name:n}).then(r=>r.ok?loadBoards(r.data.id):setMsg(mmBoardErr(r)))},className:sb,children:"＋ Nuova"}),
+draft&&i.jsx("button",{onClick:()=>{const n=prompt("Nuovo nome:",draft.name);n&&change({name:n})},className:sb,children:"Rinomina"}),
+draft&&draft.id!==activeId&&i.jsx("button",{onClick:()=>{(timer.current?(clearTimeout(timer.current),Promise.resolve(save())):Promise.resolve()).then(()=>post({action:"activate",id:draft.id}).then(r=>r.ok?(setActiveId(draft.id),setMsg("Ora tutti vedono questa lavagna.")):setMsg(mmBoardErr(r))))},className:sb,title:"Mostra questa lavagna a tutti i collegati",children:"👁 Rendi attiva per tutti"}),
+draft&&draft.id===activeId&&i.jsx("span",{className:"text-xs font-bold text-amber-300",children:"★ Attiva per tutti"}),
+draft&&i.jsx("button",{onClick:()=>{if(!confirm("Eliminare la lavagna «"+draft.name+"» con la sua mappa? Non si può annullare."))return;if(!confirm("ULTIMA CONFERMA: eliminare davvero «"+draft.name+"»?"))return;post({action:"delete",id:draft.id}).then(r=>r.ok?(editRef.current="",loadBoards()):setMsg(mmBoardErr(r)))},className:sb,style:{color:"#fca5a5"},children:"🗑 Elimina"}),
+i.jsx("button",{onClick:()=>{try{sessionStorage.removeItem("mm_board_token")}catch(e){}setToken("");setMaster(!1);setDraft(null)},className:sb,style:{marginLeft:"auto"},children:"Esci da master"})
+]});
+const gridPanel=master&&draft&&i.jsxs("div",{className:panel,style:{display:"flex",flexWrap:"wrap",alignItems:"flex-end",gap:"10px"},children:[
+i.jsxs("label",{className:"text-xs text-slate-300",style:{display:"flex",alignItems:"center",gap:"4px"},children:[i.jsx("input",{type:"checkbox",checked:draft.grid.show,onChange:e=>setGrid({show:e.target.checked})}),"Griglia"]}),
+i.jsxs("label",{className:"text-xs text-slate-300",style:{display:"flex",alignItems:"center",gap:"4px"},children:[i.jsx("input",{type:"checkbox",checked:draft.grid.snap,onChange:e=>setGrid({snap:e.target.checked})}),"Aggancia"]}),
+i.jsx(MmNum,{label:"Quadretto (px)",value:draft.grid.size,min:10,max:400,onChange:v=>setGrid({size:v})}),
+i.jsx(MmNum,{label:"Sposta X",value:draft.grid.ox,min:-400,max:400,onChange:v=>setGrid({ox:v})}),
+i.jsx(MmNum,{label:"Sposta Y",value:draft.grid.oy,min:-400,max:400,onChange:v=>setGrid({oy:v})}),
+i.jsxs("label",{style:{display:"flex",flexDirection:"column",gap:"2px",...lab},children:["Colore",i.jsx("input",{type:"color",value:draft.grid.color.length===7?draft.grid.color:"#000000",onChange:e=>setGrid({color:e.target.value}),style:{width:"44px",height:"28px",padding:0,border:"none",background:"none"}})]}),
+i.jsxs("label",{style:{display:"flex",flexDirection:"column",gap:"2px",...lab},children:["Trasparenza",i.jsx("input",{type:"range",min:0.05,max:1,step:0.05,value:draft.grid.opacity,onChange:e=>setGrid({opacity:Number(e.target.value)})})]}),
+i.jsx(MmNum,{label:"1 quadretto =",value:draft.grid.scale,min:0.1,max:1000,step:0.5,w:"64px",onChange:v=>setGrid({scale:v})}),
+i.jsxs("label",{style:{display:"flex",flexDirection:"column",gap:"2px",...lab},children:["Unità",i.jsx("input",{type:"text",value:draft.grid.unit,maxLength:8,onChange:e=>setGrid({unit:e.target.value}),style:{...mmField,width:"52px",padding:"4px 6px"}})]}),
+i.jsxs("label",{className:sb,style:{display:"inline-block"},children:["🖼 Mappa (immagine o PDF)",i.jsx("input",{type:"file",accept:"image/*,application/pdf,.pdf",style:{display:"none"},onChange:e=>{const f=e.target.files[0];e.target.value="";handleMap(f)}})]}),
+draft.bg&&i.jsx("button",{onClick:()=>{confirm("Togliere la mappa di sfondo da questa lavagna?")&&post({action:"clearBg",id:draft.id}).then(r=>{if(r.ok){const d={...draftRef.current,bg:null};draftRef.current=d;setDraft(d);fitFor.current=""}else setMsg(mmBoardErr(r))})},className:sb,children:"Togli mappa"})
+]});
+const side=master&&draft&&i.jsxs("div",{style:{flex:"0 0 280px",display:"flex",flexDirection:"column",gap:"10px"},children:[
+i.jsxs("div",{className:panel,children:[i.jsx("div",{style:lab,children:"PG ufficiali"}),i.jsxs("div",{style:{display:"flex",flexDirection:"column",gap:"4px",marginTop:"6px"},children:[offList.length===0&&i.jsx("span",{className:"text-[11px] text-slate-500",children:"Nessun PG ufficiale."}),offList.map(pg=>{const used=draft.tokens.some(t=>t.pgId===pg.id);return i.jsxs("button",{disabled:used,onClick:()=>addToken({name:pg.name,pgId:pg.id,color:mmPgColor(pg.id)}),className:sb,style:{display:"flex",justifyContent:"space-between",opacity:used?0.5:1,textAlign:"left"},children:[i.jsx("span",{style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"},children:pg.name||"Senza nome"}),i.jsx("span",{children:used?"✓":"＋"})]},pg.id)})]})]}),
+i.jsxs("div",{className:panel,children:[i.jsx("div",{style:lab,children:"Nuova pedina"}),i.jsxs("div",{style:{display:"flex",flexDirection:"column",gap:"6px",marginTop:"6px"},children:[
+i.jsx("input",{type:"text",value:np.name,maxLength:40,onChange:e=>setNp({...np,name:e.target.value}),placeholder:"Nome (es. Goblin 1)",style:mmField}),
+i.jsxs("div",{style:{display:"flex",gap:"6px",alignItems:"center"},children:[i.jsx("input",{type:"color",value:np.color,onChange:e=>setNp({...np,color:e.target.value}),style:{width:"40px",height:"30px",padding:0,border:"none",background:"none"}}),i.jsx("select",{value:np.size,onChange:e=>setNp({...np,size:Number(e.target.value)}),style:{...mmField,width:"auto"},children:[1,2,3,4].map(n=>i.jsx("option",{value:n,children:n+"×"+n},n))}),i.jsxs("select",{value:np.shape,onChange:e=>setNp({...np,shape:e.target.value}),style:{...mmField,width:"auto"},children:[i.jsx("option",{value:"circle",children:"Cerchio"}),i.jsx("option",{value:"square",children:"Quadrato"})]})]}),
+i.jsxs("label",{className:sb,style:{display:"inline-block",textAlign:"center"},children:[np.img?"✓ Immagine scelta (cambia)":"Immagine pedina (facoltativa)",i.jsx("input",{type:"file",accept:"image/*",style:{display:"none"},onChange:e=>{const f=e.target.files[0];e.target.value="";f&&mmTokenImage(f).then(u=>setNp(p=>({...p,img:u}))).catch(()=>setMsg("Immagine della pedina non leggibile."))}})]}),
+i.jsx("button",{onClick:()=>{addToken({name:np.name||"Pedina",color:np.color,size:np.size,shape:np.shape,...(np.img?{img:np.img}:{})});setNp({...np,name:"",img:""})},className:sbOn,children:"Aggiungi alla lavagna"})]})]}),
+sel&&i.jsxs("div",{className:panel,children:[i.jsx("div",{style:lab,children:"Pedina selezionata"}),i.jsxs("div",{style:{display:"flex",flexDirection:"column",gap:"6px",marginTop:"6px"},children:[
+i.jsx("input",{type:"text",value:sel.name,maxLength:40,onChange:e=>patchToken(sel.id,{name:e.target.value}),style:mmField}),
+i.jsxs("div",{style:{display:"flex",gap:"6px",alignItems:"center"},children:[i.jsx("input",{type:"color",value:sel.color,onChange:e=>patchToken(sel.id,{color:e.target.value}),style:{width:"40px",height:"30px",padding:0,border:"none",background:"none"}}),i.jsx("select",{value:sel.size,onChange:e=>patchToken(sel.id,{size:Number(e.target.value)}),style:{...mmField,width:"auto"},children:[1,2,3,4,5,6].map(n=>i.jsx("option",{value:n,children:n+"×"+n},n))}),i.jsxs("select",{value:sel.shape,onChange:e=>patchToken(sel.id,{shape:e.target.value}),style:{...mmField,width:"auto"},children:[i.jsx("option",{value:"circle",children:"Cerchio"}),i.jsx("option",{value:"square",children:"Quadrato"})]})]}),
+i.jsxs("div",{style:{display:"flex",gap:"6px",flexWrap:"wrap"},children:[i.jsxs("label",{className:sb,style:{display:"inline-block"},children:["Immagine",i.jsx("input",{type:"file",accept:"image/*",style:{display:"none"},onChange:e=>{const f=e.target.files[0];e.target.value="";f&&mmTokenImage(f).then(u=>patchToken(sel.id,{img:u})).catch(()=>setMsg("Immagine della pedina non leggibile."))}})]}),sel.img&&i.jsx("button",{onClick:()=>patchToken(sel.id,{img:void 0}),className:sb,children:"Togli immagine"}),i.jsx("button",{onClick:()=>{if(confirm("Rimuovere la pedina «"+sel.name+"» dalla lavagna?")){change({tokens:draftRef.current.tokens.filter(t=>t.id!==sel.id)});setSelId(null)}},className:sb,style:{color:"#fca5a5"},children:"Rimuovi"})]})
+]})]})
+]});
+return i.jsxs("div",{className:"space-y-3",children:[
+msg&&i.jsxs("div",{style:{background:"rgba(120,53,15,0.35)",border:"1px solid rgba(245,158,11,0.5)",color:"#fde68a",borderRadius:"12px",padding:"8px 12px",fontSize:"12px",display:"flex",justifyContent:"space-between",gap:"8px"},children:[i.jsx("span",{children:msg}),i.jsx("button",{onClick:()=>setMsg(""),className:"text-amber-200 cursor-pointer",children:"✕"})]}),
+busy&&i.jsx("div",{className:"text-xs text-amber-300",children:busy}),
+masterBar,loginBox,toolbar,gridPanel,
+i.jsxs("div",{style:{display:"flex",gap:"12px",alignItems:"flex-start",flexWrap:"wrap"},children:[
+i.jsx("div",{ref:wrapRef,style:{flex:"1 1 520px",minWidth:0,overflow:"auto",maxHeight:"72vh",border:"1px solid #1e293b",borderRadius:"12px",background:"#0f172a"},children:view?i.jsx(MmBoardCanvas,{imgUrl,w:vw,h:vh,grid:view.grid,tokens:view.tokens,zoom,editable:master&&tool==="move",selId,onSelect:setSelId,onMove:moveToken,tool}):i.jsx("div",{className:"text-center text-slate-400 text-sm",style:{padding:"60px 16px"},children:master?"Crea la tua prima lavagna con «＋ Nuova».":(pub&&pub.empty?"Il master non ha ancora attivato nessuna lavagna.":"Carico la lavagna…")})}),
+side
+]}),
+pdfDlg&&i.jsx("div",{onClick:()=>setPdfDlg(null),style:{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.65)",zIndex:60,display:"flex",alignItems:"center",justifyContent:"center",padding:"16px"},children:i.jsxs("div",{onClick:e=>e.stopPropagation(),style:{background:"#fff",color:"#0f172a",borderRadius:"12px",padding:"20px",width:"100%",maxWidth:"340px"},className:"space-y-3",children:[i.jsx("h4",{className:"text-sm font-bold text-slate-900",children:"Quale pagina del PDF?"}),i.jsxs("p",{className:"text-xs text-slate-600",children:["Il PDF ha ",pdfDlg.pages," pagine: scegli quella da usare come mappa."]}),i.jsx("input",{type:"number",min:1,max:pdfDlg.pages,value:pdfDlg.page,onChange:e=>setPdfDlg({...pdfDlg,page:Number(e.target.value)}),style:mmField}),i.jsxs("div",{style:{display:"flex",gap:"8px",justifyContent:"flex-end"},children:[i.jsx("button",{onClick:()=>setPdfDlg(null),style:{padding:"8px 14px",borderRadius:"8px",border:"1px solid #cbd5e1",background:"#fff",cursor:"pointer",fontSize:"12px",fontWeight:700},children:"Annulla"}),i.jsx("button",{onClick:usePdfPage,style:{padding:"8px 14px",borderRadius:"8px",border:"none",background:"#f59e0b",cursor:"pointer",fontSize:"12px",fontWeight:800},children:"Usa questa pagina"})]})]})})
+]})
+}
 function yx(){var H;const[o,d]=Se.useState(()=>{try{const O=localStorage.getItem(Dp);if(O){const Y=JSON.parse(O);if(Array.isArray(Y)&&Y.length>0)return Y.map(xe=>{const te=P=>/^\d/.test((P||"").trim());return xe.languages&&xe.languages.some(te)?{...xe,languages:xe.languages.filter(P=>!te(P))}:xe})}}catch(O){console.error("Failed to load characters from localStorage",O)}return[Jr("Eroe di Prova")]}),[p,c]=Se.useState(((H=o[0])==null?void 0:H.id)||""),[f,b]=Se.useState("wizard"),[x,y]=Se.useState(1),[h,m]=Se.useState(!1),[S,w]=Se.useState(!1),[q,R]=Se.useState(!1),[gm,setGm]=Se.useState(!1),[appMode,setAppMode]=Se.useState("menu"),[pv,setPv]=Se.useState({view:"list",id:""}),[promote,setPromote]=Se.useState(null),[pullOpen,setPullOpen]=Se.useState(!1),[off,setOff]=Se.useState({list:null,error:"",loading:!1});
 Se.useEffect(()=>{try{localStorage.setItem(Dp,JSON.stringify(o))}catch(O){console.error("Failed to save to localStorage",O)}},[o]);
 const loadOff=()=>{setOff(s=>({...s,loading:!0,error:""}));mmApi("GET").then(r=>setOff(r.ok&&Array.isArray(r.data.list)?{list:r.data.list,error:"",loading:!1}:{list:null,error:mmErr(r),loading:!1}))};
@@ -612,8 +804,9 @@ onPromoted=res=>{d(l=>l.map(ch=>ch.id===res.localId?{...ch,player:res.player,off
 pullOfficial=pg=>{mmApi("GET","?id="+encodeURIComponent(pg.id)).then(r=>{if(!r.ok||!r.data.character){alert(mmErr(r));return}const nc={...mmFull(r.data.character),id:`char_${Date.now()}_${Math.random().toString(36).substring(2,6)}`,officialId:pg.id,updatedAt:Date.now()};delete nc.official;d(l=>[...l,nc]),c(nc.id),setPullOpen(!1),b("wizard"),alert(`Copia locale di "${nc.name}" creata: modificala qui e poi usa "Rendi ufficiale" per aggiornare il PG ufficiale.`)})},
 dialogs=[promote&&i.jsx(MmPromoteDialog,{character:promote,officials:off.list||[],onClose:()=>setPromote(null),onDone:onPromoted},"pd"),pullOpen&&i.jsx(MmPullDialog,{off,onPick:pullOfficial,onClose:()=>setPullOpen(!1)},"pl"),i.jsx(_x,{isOpen:q,onClose:()=>R(!1),onCharacterGenerated:X,activeCharacterName:A==null?void 0:A.name},"rz"),i.jsx(hx,{isOpen:S,onClose:()=>w(!1)},"hx")],
 shell=(top,content)=>i.jsxs("div",{className:"min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-amber-500 selection:text-slate-950 flex flex-col print:bg-white print:text-black print:min-h-0 print:p-0 print:m-0",children:[top,i.jsx("main",{className:"flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 print:p-0 print:m-0 print:max-w-none print:w-full",children:content}),i.jsx("footer",{className:"bg-slate-900 border-t border-slate-800 text-center py-4 text-xs text-slate-500 print:hidden",children:"Magico Mondo GDR — Generatore Personaggi, Schede A4 e Modello Vuoto per la Stampa"}),dialogs]});
-if(appMode==="menu")return shell(i.jsx(MmTopBar,{}),i.jsx(MmMenu,{onCreate:()=>{b("wizard"),setAppMode("create")},onPlay:()=>{setPv({view:"list",id:""}),setAppMode("play")},onDice:()=>setAppMode("dice")}));
+if(appMode==="menu")return shell(i.jsx(MmTopBar,{}),i.jsx(MmMenu,{onCreate:()=>{b("wizard"),setAppMode("create")},onPlay:()=>{setPv({view:"list",id:""}),setAppMode("play")},onDice:()=>setAppMode("dice"),onBoard:()=>setAppMode("board")}));
 if(appMode==="dice")return shell(i.jsx(MmTopBar,{onMenu:goMenu,title:"Dadi"}),i.jsx(DiceTab,{playChar:null}));
+if(appMode==="board")return shell(i.jsx(MmTopBar,{onMenu:goMenu,title:"Lavagna"}),i.jsx(MmBoardPage,{}));
 if(appMode==="play")return shell(i.jsx(MmTopBar,{onMenu:goMenu,title:"Gioca"}),pv.view==="game"?i.jsx(MmGame,{id:pv.id,onBack:()=>setPv({view:"list",id:""})},pv.id):pv.view==="local"&&o.find(l=>l.id===pv.id)?i.jsx(MmLocal,{character:o.find(l=>l.id===pv.id),onChange:Z,onBack:()=>setPv({view:"list",id:""})},pv.id):pv.view==="sheet"?i.jsx(MmSheet,{id:pv.id,onBack:()=>setPv({view:"list",id:""})},pv.id):i.jsx(MmPlayHome,{locals:o,off,onReload:loadOff,onOpen:id=>setPv({view:"game",id}),onSheet:id=>setPv({view:"sheet",id}),onPromote:l=>setPromote(l),onLocal:id=>setPv({view:"local",id})}));
 return shell(i.jsxs(i.Fragment,{children:[i.jsx(rx,{characters:o,activeCharacterId:p,onSelectCharacter:c,onCreateNewCharacter:P,onDeleteCharacter:J,onOpenRandomizer:()=>R(!0),onExportJson:ie,onImportJson:pe,onPrint:ne,onPrintBlank:he,onOpenGithubGuide:()=>w(!0),activeTab:f,setActiveTab:b,onClonePlay:()=>A&&setPromote(A),onMenu:goMenu,onPullOfficial:()=>{loadOff(),setPullOpen(!0)}}),A&&i.jsx(cx,{character:A,activeTab:f,currentStep:x,onNavigateStep:O=>y(O),onFinishToSheet:()=>{m(!1),b("sheet")}})]}),A?i.jsxs(i.Fragment,{children:[f==="wizard"&&i.jsx(xx,{character:A,onChange:Z,currentStep:x,onStepChange:y,onFinishToSheet:()=>{m(!1),b("sheet")}}),f==="sheet"&&i.jsx(vx,{character:A,isBlankSheet:h,onToggleBlank:m,onBack:()=>b("wizard"),printGrimoireOnly:gm,onSetGrimoireOnly:setGm}),f==="spells"&&i.jsx(sf,{character:A,onChange:Z})]}):i.jsx("div",{className:"text-center py-20 text-slate-400",children:'Nessun personaggio trovato. Clicca su "Nuovo PG" per iniziare.'}))}
 wb.createRoot(document.getElementById("root")).render(i.jsx(Se.StrictMode,{children:i.jsx(yx,{})}));

@@ -1,14 +1,14 @@
-// Archivio dei PG ufficiali.
+// Archivio condiviso (PG ufficiali e lavagne).
 // In produzione usa Redis (Upstash, collegato da Vercel → Storage): le variabili
 // KV_REST_API_URL / KV_REST_API_TOKEN (o UPSTASH_REDIS_REST_URL / _TOKEN) vengono create da Vercel.
-// In locale (npm run dev) ripiega su un file .data/pgs.json, solo per provare.
+// In locale (npm run dev) ripiega su un file .data/store.json, solo per provare.
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-const KEY = 'mm:pgs';
+const PG_KEY = 'mm:pgs';
 const REDIS_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
 const REDIS_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
-const FILE = path.join(process.cwd(), '.data', 'pgs.json');
+const FILE = path.join(process.cwd(), '.data', 'store.json');
 
 export function storeKind() {
   if (REDIS_URL && REDIS_TOKEN) return 'redis';
@@ -28,58 +28,97 @@ async function redis(command) {
 
 async function readFile() {
   try {
-    return JSON.parse(await fs.readFile(FILE, 'utf8'));
+    const data = JSON.parse(await fs.readFile(FILE, 'utf8'));
+    return { h: data.h || {}, k: data.k || {} };
   } catch {
-    return {};
+    return { h: {}, k: {} };
   }
 }
 
-async function writeFile(all) {
+async function writeFile(data) {
   await fs.mkdir(path.dirname(FILE), { recursive: true });
-  await fs.writeFile(FILE, JSON.stringify(all));
+  await fs.writeFile(FILE, JSON.stringify(data));
 }
 
-export async function getAll() {
+// ---- hash: campo -> stringa ----
+export async function hGetAll(key) {
   if (storeKind() === 'redis') {
-    const flat = (await redis(['HGETALL', KEY])) || [];
+    const flat = (await redis(['HGETALL', key])) || [];
     const all = {};
-    for (let k = 0; k < flat.length; k += 2) {
-      try {
-        all[flat[k]] = JSON.parse(flat[k + 1]);
-      } catch {
-        /* record illeggibile: ignorato */
-      }
-    }
+    for (let n = 0; n < flat.length; n += 2) all[flat[n]] = flat[n + 1];
     return all;
   }
-  return readFile();
+  const data = await readFile();
+  return data.h[key] || {};
+}
+
+export async function hGet(key, field) {
+  if (storeKind() === 'redis') return (await redis(['HGET', key, field])) || null;
+  const data = await readFile();
+  return (data.h[key] && data.h[key][field]) || null;
+}
+
+export async function hSet(key, field, value) {
+  if (storeKind() === 'redis') {
+    await redis(['HSET', key, field, value]);
+    return;
+  }
+  const data = await readFile();
+  data.h[key] = data.h[key] || {};
+  data.h[key][field] = value;
+  await writeFile(data);
+}
+
+export async function hDel(key, field) {
+  if (storeKind() === 'redis') {
+    await redis(['HDEL', key, field]);
+    return;
+  }
+  const data = await readFile();
+  if (data.h[key]) delete data.h[key][field];
+  await writeFile(data);
+}
+
+// ---- chiave semplice: stringa ----
+export async function kGet(key) {
+  if (storeKind() === 'redis') return (await redis(['GET', key])) || null;
+  const data = await readFile();
+  return data.k[key] || null;
+}
+
+export async function kSet(key, value) {
+  if (storeKind() === 'redis') {
+    await redis(['SET', key, value]);
+    return;
+  }
+  const data = await readFile();
+  data.k[key] = value;
+  await writeFile(data);
+}
+
+// ---- PG ufficiali (record JSON) ----
+export async function getAll() {
+  const raw = await hGetAll(PG_KEY);
+  const all = {};
+  for (const [id, value] of Object.entries(raw)) {
+    try {
+      all[id] = JSON.parse(value);
+    } catch {
+      /* record illeggibile: ignorato */
+    }
+  }
+  return all;
 }
 
 export async function get(id) {
-  if (storeKind() === 'redis') {
-    const raw = await redis(['HGET', KEY, id]);
-    return raw ? JSON.parse(raw) : null;
-  }
-  const all = await readFile();
-  return all[id] || null;
+  const raw = await hGet(PG_KEY, id);
+  return raw ? JSON.parse(raw) : null;
 }
 
 export async function put(id, record) {
-  if (storeKind() === 'redis') {
-    await redis(['HSET', KEY, id, JSON.stringify(record)]);
-    return;
-  }
-  const all = await readFile();
-  all[id] = record;
-  await writeFile(all);
+  await hSet(PG_KEY, id, JSON.stringify(record));
 }
 
 export async function del(id) {
-  if (storeKind() === 'redis') {
-    await redis(['HDEL', KEY, id]);
-    return;
-  }
-  const all = await readFile();
-  delete all[id];
-  await writeFile(all);
+  await hDel(PG_KEY, id);
 }
