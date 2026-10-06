@@ -86,6 +86,16 @@ export async function kGet(key) {
   return data.k[key] || null;
 }
 
+// Più chiavi semplici con un solo comando (MGET): conta come 1 comando per Upstash.
+export async function kGetMany(keys) {
+  if (storeKind() === 'redis') {
+    const res = (await redis(['MGET', ...keys])) || [];
+    return keys.map((_, n) => res[n] || null);
+  }
+  const data = await readFile();
+  return keys.map((k) => data.k[k] || null);
+}
+
 export async function kSet(key, value) {
   if (storeKind() === 'redis') {
     await redis(['SET', key, value]);

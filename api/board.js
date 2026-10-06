@@ -5,12 +5,16 @@
 //  - la mappa (immagine ridotta dal browser) è separata e si scarica una volta sola
 //  - un solo master alla volta: un nuovo accesso master prende il controllo e il vecchio passa in sola lettura
 import crypto from 'node:crypto';
-import { hGetAll, hGet, hSet, hDel, kGet, kSet, storeKind } from './_store.js';
+import { hGetAll, hGet, hSet, hDel, kGet, kGetMany, kSet, storeKind } from './_store.js';
 
 const BOARDS = 'mm:boards';
 const IMGS = 'mm:board_imgs';
 const PUBLIC = 'mm:board_public';
 const REV = 'mm:board_rev';
+// Il master collegato manda un segnale ogni 30 secondi: se non ne arrivano da 100 secondi
+// consideriamo che non ci sia nessuno e chi guarda smette di chiedere aggiornamenti di continuo.
+const LIVE = 'mm:board_live';
+const LIVE_MS = 100_000;
 const LOCK = 'mm:board_lock';
 const MAX_BOARDS = 10;
 const MAX_IMG_CHARS = 3_400_000;
@@ -202,7 +206,9 @@ export default async function handler(req, res) {
         return res.end(buf);
       }
       if (query.poll) {
-        let k = await kGet(REV);
+        const [revRaw, liveRaw] = await kGetMany([REV, LIVE]);
+        let k = revRaw;
+        const live = Date.now() - Number(liveRaw || 0) < LIVE_MS;
         if (!k) {
           // lavagne create prima dell'introduzione del numero di versione: lo ricava e lo salva
           const rawPublic = await kGet(PUBLIC);
@@ -212,8 +218,9 @@ export default async function handler(req, res) {
             await kSet(REV, k);
           }
         }
-        res.setHeader('Cache-Control', 'public, s-maxage=2, stale-while-revalidate=2');
-        return res.status(200).json({ k: k || '' });
+        // master collegato: risposta condivisa per 3 secondi; non collegato: per 10, così chi guarda non consuma quasi nulla
+        res.setHeader('Cache-Control', live ? 'public, s-maxage=3, stale-while-revalidate=3' : 'public, s-maxage=10, stale-while-revalidate=10');
+        return res.status(200).json({ k: k || '', live });
       }
       if (query.id) {
         res.setHeader('Cache-Control', 'no-store');
@@ -222,7 +229,7 @@ export default async function handler(req, res) {
         return res.status(200).json(publicOf(rec));
       }
       const raw = await kGet(PUBLIC);
-      res.setHeader('Cache-Control', 'public, s-maxage=2, stale-while-revalidate=2');
+      res.setHeader('Cache-Control', 'public, s-maxage=3, stale-while-revalidate=3');
       return res.status(200).json(raw ? JSON.parse(raw) : { empty: true });
     }
 
@@ -268,11 +275,27 @@ export default async function handler(req, res) {
       }
       const token = crypto.randomBytes(16).toString('hex');
       await kSet(LOCK, JSON.stringify({ token, at: Date.now() }));
+      await kSet(LIVE, String(Date.now()));
       return res.status(200).json({ token });
     }
 
     // ---- da qui in poi serve essere il master in carica ----
     if (!(await isMaster(body.token))) return res.status(401).json({ error: 'not_master' });
+
+    // segnale di presenza del master (ogni 30 secondi) e uscita
+    if (action === 'ping') {
+      await kSet(LIVE, String(Date.now()));
+      return res.status(200).json({ ok: true });
+    }
+    if (action === 'away') {
+      await kSet(LIVE, '0');
+      return res.status(200).json({ ok: true });
+    }
+    if (action === 'logout') {
+      await kSet(LIVE, '0');
+      await kSet(LOCK, '');
+      return res.status(200).json({ ok: true });
+    }
 
     if (action === 'list') {
       const all = await hGetAll(BOARDS);
