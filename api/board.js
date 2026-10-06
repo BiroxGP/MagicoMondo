@@ -10,6 +10,7 @@ import { hGetAll, hGet, hSet, hDel, kGet, kSet, storeKind } from './_store.js';
 const BOARDS = 'mm:boards';
 const IMGS = 'mm:board_imgs';
 const PUBLIC = 'mm:board_public';
+const REV = 'mm:board_rev';
 const LOCK = 'mm:board_lock';
 const MAX_BOARDS = 10;
 const MAX_IMG_CHARS = 3_400_000;
@@ -98,6 +99,31 @@ function cleanEffects(list) {
   });
 }
 
+// Disegni a mano libera: ogni tratto è una spezzata di punti [x1,y1,x2,y2,...] in pixel della mappa.
+function cleanDrawings(list) {
+  if (!Array.isArray(list)) return [];
+  let budget = 40000;
+  const out = [];
+  for (const d of list.slice(0, 300)) {
+    const src = d && typeof d === 'object' ? d : {};
+    const arr = Array.isArray(src.p) ? src.p.slice(0, 2000) : [];
+    const pts = [];
+    for (let k = 0; k + 1 < arr.length; k += 2) {
+      pts.push(Math.round(num(arr[k], -5000, 20000, 0)), Math.round(num(arr[k + 1], -5000, 20000, 0)));
+    }
+    if (pts.length < 4) continue;
+    if (budget - pts.length < 0) break;
+    budget -= pts.length;
+    out.push({
+      id: text(src.id, 40) || 'd' + out.length,
+      color: COLOR_RE.test(src.color || '') ? src.color : '#dc2626',
+      width: Math.round(num(src.width, 1, 40, 4)),
+      p: pts,
+    });
+  }
+  return out;
+}
+
 const publicOf = (rec) => ({
   id: rec.id,
   name: rec.name,
@@ -107,7 +133,15 @@ const publicOf = (rec) => ({
   grid: rec.grid,
   tokens: rec.tokens,
   effects: rec.effects || [],
+  drawings: rec.drawings || [],
 });
+
+// Scrive la lavagna attiva e il suo "numero di versione": chi guarda legge solo quello (pochi byte)
+// e scarica lo stato completo soltanto quando il numero cambia.
+async function publish(rec) {
+  await kSet(PUBLIC, rec ? JSON.stringify(publicOf(rec)) : '');
+  await kSet(REV, rec ? rec.id + ':' + rec.rev : '');
+}
 
 async function isMaster(token) {
   if (!token) return false;
@@ -139,7 +173,7 @@ async function publishIfActive(rec) {
   } catch {
     activeId = null;
   }
-  if (activeId === rec.id) await kSet(PUBLIC, JSON.stringify(publicOf(rec)));
+  if (activeId === rec.id) await publish(rec);
 }
 
 export default async function handler(req, res) {
@@ -166,6 +200,20 @@ export default async function handler(req, res) {
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
         res.setHeader('Content-Length', String(buf.length));
         return res.end(buf);
+      }
+      if (query.poll) {
+        let k = await kGet(REV);
+        if (!k) {
+          // lavagne create prima dell'introduzione del numero di versione: lo ricava e lo salva
+          const rawPublic = await kGet(PUBLIC);
+          if (rawPublic) {
+            const cur = JSON.parse(rawPublic);
+            k = cur.id + ':' + cur.rev;
+            await kSet(REV, k);
+          }
+        }
+        res.setHeader('Cache-Control', 'public, s-maxage=2, stale-while-revalidate=2');
+        return res.status(200).json({ k: k || '' });
       }
       if (query.id) {
         res.setHeader('Cache-Control', 'no-store');
@@ -263,9 +311,10 @@ export default async function handler(req, res) {
         grid: { ...DEFAULT_GRID },
         tokens: [],
         effects: [],
+        drawings: [],
       };
       await saveBoard(rec);
-      if (!(await kGet(PUBLIC))) await kSet(PUBLIC, JSON.stringify(publicOf(rec)));
+      if (!(await kGet(PUBLIC))) await publish(rec);
       return res.status(200).json({ id });
     }
 
@@ -280,6 +329,7 @@ export default async function handler(req, res) {
         grid: cleanGrid(st.grid),
         tokens: cleanTokens(st.tokens),
         effects: cleanEffects(st.effects),
+        drawings: cleanDrawings(st.drawings),
         rev: rec.rev + 1,
         updatedAt: Date.now(),
       };
@@ -312,7 +362,7 @@ export default async function handler(req, res) {
     }
 
     if (action === 'activate') {
-      await kSet(PUBLIC, JSON.stringify(publicOf(rec)));
+      await publish(rec);
       return res.status(200).json({ ok: true });
     }
 
@@ -329,7 +379,7 @@ export default async function handler(req, res) {
       if (activeId === rec.id) {
         const rest = await hGetAll(BOARDS);
         const first = Object.values(rest)[0];
-        await kSet(PUBLIC, first ? JSON.stringify(publicOf(JSON.parse(first))) : '');
+        await publish(first ? JSON.parse(first) : null);
       }
       return res.status(200).json({ ok: true });
     }
