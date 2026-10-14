@@ -182,9 +182,13 @@ export default async function handler(req, res) {
       if (!character) return res.status(400).json({ error: 'bad_request' });
       if (!String(character.player || '').trim()) return res.status(400).json({ error: 'player_required' });
       if (JSON.stringify(character).length > MAX_BYTES) return res.status(413).json({ error: 'too_large' });
-      const all = await getAll();
-      const taken = playerTaken(all, character.player, String(id));
-      if (taken) return res.status(409).json({ error: 'player_taken', id: taken.id, name: taken.name });
+      // il controllo del giocatore doppio serve solo se il nome giocatore è cambiato: evita di leggere
+      // tutti i PG a ogni salvataggio (più lento e più comandi sul database)
+      if (normPlayer(character.player) !== normPlayer(rec.character && rec.character.player)) {
+        const all = await getAll();
+        const taken = playerTaken(all, character.player, String(id));
+        if (taken) return res.status(409).json({ error: 'player_taken', id: taken.id, name: taken.name });
+      }
       const rev = (rec.rev || 1) + 1;
       await put(String(id), { ...rec, character, rev, updatedAt: Date.now() });
       return res.status(200).json({ ok: true, rev });
