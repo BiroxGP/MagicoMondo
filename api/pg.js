@@ -58,6 +58,8 @@ function summary(id, rec) {
     name: c.name || '',
     player: c.player || '',
     level: c.level || 1,
+    primaryClassLevel: c.primaryClassLevel || 0,
+    secondaryClassLevel: c.secondaryClassLevel || 0,
     primaryClassId: c.primaryClassId || '',
     secondaryClassId: c.secondaryClassId || '',
     archetypeRace: c.archetypeRace || '',
