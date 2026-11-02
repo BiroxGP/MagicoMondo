@@ -547,7 +547,9 @@ const sc=mmGrade(o,which,/Scacciare non morti (\d+)/,/Scacciare (?:migliorato:\s
 if(sc)out.push({key:"scacciare:"+sc.cls.id,kind:"s",name:"Scacciare non morti",grade:sc.val,cls:sc.cls.name,lv:sc.lv});
 if(es)out.push({key:"esorcismo:"+es.cls.id,kind:"e",name:"Esorcismo",grade:es.val,cls:es.cls.name,lv:es.lv})
 }
-return out
+const ov=o.pctOverrides||{},best={};
+for(const a of out){const g=ov[a.key]!==void 0?ov[a.key]:a.grade;if(!best[a.kind]||g>best[a.kind].g)best[a.kind]={a,g}}
+return["s","e"].map(k=>best[k]&&best[k].a).filter(Boolean)
 }
 function MmScacModal({character:o,ab,onClose}){
 const[rank,setRank]=Se.useState(1),[res,setRes]=Se.useState(null),[st,setSt]=Se.useState(""),isS=ab.kind==="s",kar=(o.attributes&&o.attributes.KAR)||0,base=isS?kar:Math.floor(kar/2),target=base+ab.grade-rank,
