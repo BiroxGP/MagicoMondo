@@ -514,7 +514,9 @@ out.push({key:cls.id+":"+sa.level+":"+sn,name:sn,pct:parseInt(sm[2],10),cls:cls.
 };
 add(ge.find(z=>z.id===o.primaryClassId),"p");
 add(o.secondaryClassId&&o.secondaryClassId!=="none"?ge.find(z=>z.id===o.secondaryClassId):void 0,"s");
-return out
+const ov=o.pctOverrides||{},best=new Map();
+for(const a of out){const k=a.name.toLowerCase(),g=ov[a.key]!==void 0?ov[a.key]:a.pct,b=best.get(k);if(!b||g>b.g)best.set(k,{a,g})}
+return[...best.values()].map(x=>x.a)
 }
 function MmPctRollModal({character:o,ab,free,onFree,onClose}){
 const[fr,setFr]=Se.useState(free),[raises,setRaises]=Se.useState(free),[res,setRes]=Se.useState(null),[st,setSt]=Se.useState(""),paid=Math.max(0,raises-fr),target=Math.max(0,ab.pct-5*paid),
