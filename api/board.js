@@ -77,12 +77,26 @@ function cleanTokens(list) {
       y: num(tk.y, -5000, 20000, 0),
     };
     if (tk.pgId) out.pgId = text(tk.pgId, 60);
+    if (tk.ini !== undefined && tk.ini !== null && tk.ini !== '' && Number.isFinite(Number(tk.ini))) out.ini = Math.round(num(tk.ini, -999, 9999, 0));
+    const wound = Math.round(num(tk.wound, 0, 3, 0));
+    if (wound > 0) out.wound = wound;
     if (typeof tk.img === 'string' && tk.img.startsWith('data:image/') && tk.img.length <= 9000 && withImg < 40) {
       out.img = tk.img;
       withImg++;
     }
     return out;
   });
+}
+
+// Turni di combattimento: l'ordine tra pedine con la stessa iniziativa, chi ha il turno e il round.
+function cleanTurn(t) {
+  const src = t && typeof t === 'object' ? t : {};
+  const order = [];
+  for (const id of Array.isArray(src.order) ? src.order.slice(0, 150) : []) {
+    const v = text(id, 40);
+    if (v && !order.includes(v)) order.push(v);
+  }
+  return { order, active: text(src.active, 40), round: Math.round(num(src.round, 1, 999, 1)) };
 }
 
 // Effetti di gioco (aree di spell, ecc.): cerchi o quadrati con un testo, grandi quanto vuole il master.
@@ -138,6 +152,7 @@ const publicOf = (rec) => ({
   tokens: rec.tokens,
   effects: rec.effects || [],
   drawings: rec.drawings || [],
+  turn: rec.turn || { order: [], active: '', round: 1 },
 });
 
 // Scrive la lavagna attiva e il suo "numero di versione": chi guarda legge solo quello (pochi byte)
@@ -335,6 +350,7 @@ export default async function handler(req, res) {
         tokens: [],
         effects: [],
         drawings: [],
+        turn: { order: [], active: '', round: 1 },
       };
       await saveBoard(rec);
       if (!(await kGet(PUBLIC))) await publish(rec);
@@ -353,6 +369,7 @@ export default async function handler(req, res) {
         tokens: cleanTokens(st.tokens),
         effects: cleanEffects(st.effects),
         drawings: cleanDrawings(st.drawings),
+        turn: cleanTurn(st.turn),
         rev: rec.rev + 1,
         updatedAt: Date.now(),
       };
