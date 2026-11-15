@@ -508,62 +508,83 @@ const f=ge.find(x=>x.id===o.primaryClassId),b=o.secondaryClassId&&o.secondaryCla
 if(found&&found.value!==void 0)return found.value;
 return Math.max(0,(f&&f.baseSkills&&f.baseSkills[name])||0,(b&&b.baseSkills&&b.baseSkills[name])||0)
 }
-const MM_KINDS=[["1m","Arma a una mano"],["2m","Arma a due mani"],["scudo","Scudo"],["speciale","Speciale (mossa, non si equipaggia)"]];
+const MM_KINDS=[["1m","Arma a una mano"],["2m","Arma a due mani"],["scudo","Scudo"],["speciale","Speciale (mossa, senza stile)"]];
 function MmCombatPage({o,d,onIni}){
 const m=kb(o),db=o.derivedBonuses||{},iniTot=Math.round(((m.ini||0)+(db.ini||0))*10)/10,dex=(o.attributes.DEX||0)+Agp(o.age).DEX,
 cs=ct.filter(s=>s.category==="Combattimento").map(s=>s.name),
-real=o.weapons||[],hasLot=real.some(w=>w.id==="builtin_lottare"||/lottare/i.test(w.name||"")),
-virt={id:"builtin_lottare",builtin:"lottare",name:"Lottare",skill:"Lottare",kind:"speciale",equipped:!1,mv:"0",bil:"0",ibv:"0",dfb:"0",cri:"",damage:"",type:"",notes:"",ocvBonus:"",dcvBonus:""},
+real=o.weapons||[],styles=o.combatStyles||[],active=o.activeStyleId||"",
+hasLot=real.some(w=>w.id==="builtin_lottare"||/lottare/i.test(w.name||"")),
+virt={id:"builtin_lottare",builtin:"lottare",name:"Lottare",skill:"Lottare",kind:"speciale",mv:"0",bil:"0",ibv:"0",dfb:"0",cri:"",damage:"",type:"",notes:"",ocvBonus:"",dcvBonus:""},
 rows=hasLot?real:[virt,...real],
-save=list=>d({...o,weapons:list,updatedAt:Date.now()}),
-upd=(id,patch)=>{if(real.some(w=>w.id===id))save(real.map(w=>w.id===id?{...w,...patch}:w));else if(id==="builtin_lottare")save([{...virt,...patch},...real])},
-add=kind=>save([...real,{id:"w_"+Date.now(),name:"",skill:kind==="speciale"?"Lottare":"Armi bianche",kind,equipped:!1,mv:"",bil:"",ibv:"",dfb:"",cri:"",damage:"",type:"",notes:"",ocvBonus:"",dcvBonus:""}]),
-rm=w=>{if(confirm("Rimuovere «"+(w.name||"questa riga")+"» dal combattimento?"))save(real.filter(x=>x.id!==w.id))},
+save=patch=>d({...o,...patch,updatedAt:Date.now()}),
+saveRows=list=>save({weapons:list}),
+upd=(id,patch)=>{if(real.some(w=>w.id===id))saveRows(real.map(w=>w.id===id?{...w,...patch}:w));else if(id==="builtin_lottare")saveRows([{...virt,...patch},...real])},
+addRow=(kind,styleId)=>saveRows([...real,{id:"w_"+Date.now(),name:"",skill:kind==="speciale"?"Lottare":"Armi bianche",kind,...(styleId?{styleId}:{}),mv:"",bil:"",ibv:"",dfb:"",cri:"",damage:"",type:"",notes:"",ocvBonus:"",dcvBonus:""}]),
+rmRow=w=>{if(confirm("Rimuovere «"+(w.name||"questa riga")+"» dal combattimento?"))saveRows(real.filter(x=>x.id!==w.id))},
+addStyle=()=>{const id="cs_"+Date.now();save({combatStyles:[...styles,{id,name:"",ibv:""}],...(styles.length===0&&!active?{activeStyleId:id}:{})})},
+updStyle=(id,p)=>save({combatStyles:styles.map(s=>s.id===id?{...s,...p}:s)}),
+rmStyle=s=>{if(!confirm("Eliminare lo stile «"+(s.name||"senza nome")+"»? Le sue righe restano, senza stile."))return;save({combatStyles:styles.filter(x=>x.id!==s.id),weapons:real.map(w=>w.styleId===s.id?{...w,styleId:void 0}:w),activeStyleId:active===s.id?"":active})},
 kindOf=w=>w.kind||"1m",
-eq=rows.filter(w=>w.equipped&&kindOf(w)!=="speciale"),
-weaponsEq=eq.filter(w=>kindOf(w)==="1m"||kindOf(w)==="2m"),shieldsEq=eq.filter(w=>kindOf(w)==="scudo"),
-hands=eq.reduce((a,w)=>a+(kindOf(w)==="2m"?2:1),0),shieldDfb=shieldsEq.reduce((a,w)=>a+mmN(w.dfb),0),
-styleLabel=weaponsEq.some(w=>kindOf(w)==="2m")?"Arma a due mani":weaponsEq.length>=2?"Arma + arma":weaponsEq.length===1&&shieldsEq.length?"Arma + scudo":weaponsEq.length===1?"Arma sola":shieldsEq.length?"Solo scudo":"Nessuna arma equipaggiata",
-calc=w=>{const k=kindOf(w),lot=w.builtin==="lottare",sk=w.skill?mmSkillVal(o,w.skill):null,half=sk===null?null:Math.floor((dex+sk+mmN(w.bil))/2),sh=w.equipped&&(k==="1m"||k==="2m")?shieldDfb:0,base=lot?m.unarmedDamage:w.damage,bonus=lot?0:m.strDmgBonus*(k==="2m"?2:1);
-return{k,lot,sk,ocv:half===null?null:half+mmN(w.ocvBonus),dcv:half===null?null:half+mmN(w.dfb)+mmN(w.dcvBonus)+sh,ini:Math.round((iniTot+mmN(w.ibv))*10)/10,cri:lot?m.critici:w.cri,base,bonus,tot:lot?String(base):mmAddDmg(base,bonus)}},
+isSpec=w=>kindOf(w)==="speciale",
+members=s=>rows.filter(w=>!isSpec(w)&&w.styleId===s.id),
+loose=rows.filter(w=>!isSpec(w)&&!styles.some(s=>s.id===w.styleId)),
+specials=rows.filter(isSpec),
+styleIni=s=>Math.round((iniTot+mmN(s.ibv))*10)/10,
+handsOf=list=>list.reduce((a,w)=>a+(kindOf(w)==="2m"?2:1),0),
+calc=w=>{const k=kindOf(w),lot=w.builtin==="lottare",sk=w.skill?mmSkillVal(o,w.skill):null,half=sk===null?null:Math.floor((dex+sk+mmN(w.bil))/2),base=lot?m.unarmedDamage:w.damage,bonus=lot?0:m.strDmgBonus*(k==="2m"?2:1);
+return{k,lot,sk,ocv:half===null?null:half+mmN(w.ocvBonus),dcv:half===null?null:half+mmN(w.dfb)+mmN(w.dcvBonus),ini:Math.round((iniTot+mmN(w.ibv))*10)/10,cri:lot?m.critici:w.cri,base,bonus,tot:lot?String(base):mmAddDmg(base,bonus)}},
 inp="w-full border border-slate-300 rounded px-1 py-0.5 text-xs text-center text-slate-900 bg-white focus:outline-none focus:border-amber-500",
 lbl="block text-[9px] uppercase tracking-wider text-slate-500 text-center",
 box="border border-slate-300 rounded p-2 text-center",
+yel=" bg-amber-100 border-amber-400",
+iniBtn=(label,base)=>i.jsx("button",{onClick:()=>onIni({ini:!0,label,title:"Iniziativa",base}),className:"px-1.5 py-0.5 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 text-[10px] font-extrabold cursor-pointer",title:"Tira l'iniziativa (d10 che si ritira sul 10) con questo valore",children:"🎲"}),
 field=(w,key,label,ro)=>i.jsxs("div",{children:[i.jsx("label",{className:lbl,children:label}),i.jsx("input",{type:"text",value:ro!==void 0?ro:(w[key]===void 0?"":w[key]),readOnly:ro!==void 0,onChange:e=>upd(w.id,{[key]:e.target.value}),className:inp+(ro!==void 0?" bg-slate-100 text-slate-500":"")})]},key),
-card=w=>{const c=calc(w),isEq=w.equipped&&c.k!=="speciale";
-return i.jsxs("div",{className:"border-2 rounded-xl p-2 space-y-2 "+(isEq?"border-emerald-500 bg-emerald-50/40":"border-slate-300 bg-white"),children:[
+rowCard=w=>{const c=calc(w),spec=c.k==="speciale";
+return i.jsxs("div",{className:"border border-slate-300 rounded-xl p-2 space-y-2 bg-white",children:[
 i.jsxs("div",{className:"flex flex-wrap items-center gap-2",children:[
 i.jsx("span",{className:"px-2 py-1 rounded bg-slate-900 text-amber-300 text-[11px] font-extrabold uppercase tracking-wide",title:"Skill su cui è calcolato il rigo",children:w.skill?w.skill+" "+c.sk:"scegli la skill"}),
 i.jsx("input",{type:"text",value:w.name||"",placeholder:"Nome arma / mossa",onChange:e=>upd(w.id,{name:e.target.value}),className:"flex-1 min-w-[140px] border-b border-dashed border-slate-400 bg-transparent text-sm font-bold text-slate-900 focus:outline-none focus:border-amber-500"}),
 i.jsxs("select",{value:w.skill||"",onChange:e=>upd(w.id,{skill:e.target.value}),className:"border border-slate-300 rounded px-1 py-0.5 text-xs bg-white text-slate-900",title:"Skill del rigo",children:[i.jsx("option",{value:"",children:"— skill —"}),cs.map(n=>i.jsx("option",{value:n,children:n},n))]}),
-i.jsx("select",{value:c.k,onChange:e=>upd(w.id,{kind:e.target.value,...(e.target.value==="speciale"?{equipped:!1}:{})}),className:"border border-slate-300 rounded px-1 py-0.5 text-xs bg-white text-slate-900",children:MM_KINDS.map(([v,n])=>i.jsx("option",{value:v,children:n},v))}),
-c.k!=="speciale"&&i.jsxs("label",{className:"flex items-center gap-1 text-xs font-bold text-slate-700 cursor-pointer",children:[i.jsx("input",{type:"checkbox",checked:!!w.equipped,onChange:e=>upd(w.id,{equipped:e.target.checked})}),"Equipaggiato"]}),
-!c.lot&&i.jsx("button",{onClick:()=>rm(w),className:"text-slate-400 hover:text-red-400 cursor-pointer text-xs",title:"Rimuovi",children:"✕"})]}),
-i.jsxs("div",{className:"grid grid-cols-3 sm:grid-cols-5 gap-1.5",children:[field(w,"mv","MV"),field(w,"bil","BIL"),field(w,"ibv","IBV"),field(w,"dfb","DFB"),field(w,"cri","CRI",c.lot?String(c.cri):void 0),field(w,"damage","Danni base",c.lot?String(c.base):void 0),field(w,"type","Range / StM"),field(w,"notes","Altro / Bonus"),field(w,"ocvBonus","Mod. OCV"),field(w,"dcvBonus","Mod. DCV")]}),
-i.jsxs("div",{className:"grid grid-cols-2 sm:grid-cols-4 gap-1.5",children:[
+i.jsx("select",{value:c.k,onChange:e=>upd(w.id,{kind:e.target.value,...(e.target.value==="speciale"?{styleId:void 0}:{})}),className:"border border-slate-300 rounded px-1 py-0.5 text-xs bg-white text-slate-900",children:MM_KINDS.map(([v,n])=>i.jsx("option",{value:v,children:n},v))}),
+!spec&&styles.length>0&&i.jsxs("select",{value:styles.some(s=>s.id===w.styleId)?w.styleId:"",onChange:e=>upd(w.id,{styleId:e.target.value||void 0}),className:"border border-slate-300 rounded px-1 py-0.5 text-xs bg-white text-slate-900",title:"Stile di combattimento di questo rigo",children:[i.jsx("option",{value:"",children:"— nessuno stile —"}),styles.map(s=>i.jsx("option",{value:s.id,children:s.name||"Stile senza nome"},s.id))]}),
+!c.lot&&i.jsx("button",{onClick:()=>rmRow(w),className:"text-slate-400 hover:text-red-400 cursor-pointer text-xs",title:"Rimuovi",children:"✕"})]}),
+i.jsxs("div",{className:"grid grid-cols-3 sm:grid-cols-5 gap-1.5",children:[field(w,"mv","MV"),field(w,"bil","BIL"),spec&&field(w,"ibv","IBV"),field(w,"dfb","DFB"),field(w,"cri","CRI",c.lot?String(c.cri):void 0),field(w,"damage","Danni base",c.lot?String(c.base):void 0),field(w,"type","Range / StM"),field(w,"notes","Altro / Bonus"),field(w,"ocvBonus","Mod. OCV"),field(w,"dcvBonus","Mod. DCV")]}),
+i.jsxs("div",{className:"grid gap-1.5 "+(spec?"grid-cols-2 sm:grid-cols-4":"grid-cols-3"),children:[
 i.jsxs("div",{className:box+" bg-slate-50",children:[i.jsx("div",{className:lbl,children:"OCV"}),i.jsx("div",{className:"font-mono font-black text-lg text-slate-900",children:c.ocv===null?"—":c.ocv})]}),
 i.jsxs("div",{className:box+" bg-slate-50",children:[i.jsx("div",{className:lbl,children:"DCV"}),i.jsx("div",{className:"font-mono font-black text-lg text-slate-900",children:c.dcv===null?"—":c.dcv})]}),
-i.jsxs("div",{className:box+" bg-amber-100 border-amber-400",children:[i.jsx("div",{className:lbl+" text-amber-900",children:"Iniziativa"}),i.jsxs("div",{className:"flex items-center justify-center gap-1",children:[i.jsx("span",{className:"font-mono font-black text-lg text-amber-950",children:c.ini}),i.jsx("button",{onClick:()=>onIni({ini:!0,label:w.name||w.skill||"",title:"Iniziativa",base:c.ini}),className:"px-1.5 py-0.5 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 text-[10px] font-extrabold cursor-pointer",title:"Tira l'iniziativa (d10 che si ritira sul 10) con questo valore",children:"🎲"})]})]}),
-i.jsxs("div",{className:box+" bg-amber-100 border-amber-400",children:[i.jsx("div",{className:lbl+" text-amber-900",children:"Danni totali"}),i.jsx("div",{className:"font-mono font-black text-base text-amber-950",title:c.lot?"Danni a mani nude dalla Forza":"Danni base + bonus Forza ("+(c.bonus>=0?"+":"")+c.bonus+")",children:c.tot})]})]})
+spec&&i.jsxs("div",{className:box+yel,children:[i.jsx("div",{className:lbl+" text-amber-900",children:"Iniziativa"}),i.jsxs("div",{className:"flex items-center justify-center gap-1",children:[i.jsx("span",{className:"font-mono font-black text-lg text-amber-950",children:c.ini}),iniBtn(w.name||w.skill||"",c.ini)]})]}),
+i.jsxs("div",{className:box+yel,children:[i.jsx("div",{className:lbl+" text-amber-900",children:"Danni totali"}),i.jsx("div",{className:"font-mono font-black text-base text-amber-950",title:c.lot?"Danni a mani nude dalla Forza":"Danni base + bonus Forza ("+(c.bonus>=0?"+":"")+c.bonus+")",children:c.tot})]})]})
 ]},w.id)},
-sec=(title,list,hint)=>list.length>0&&i.jsxs("div",{className:"space-y-2",children:[i.jsxs("h5",{className:"text-xs font-bold uppercase tracking-wider text-slate-700 border-b border-slate-300 pb-1",children:[title,hint&&i.jsx("span",{className:"ml-2 text-[10px] font-normal normal-case text-slate-500",children:hint})]}),list.map(card)]}),
-inUse=rows.filter(w=>w.equipped&&kindOf(w)!=="speciale"),
-offDuty=rows.filter(w=>!w.equipped&&kindOf(w)!=="speciale"),
-specials=rows.filter(w=>kindOf(w)==="speciale");
+styleCard=s=>{const mem=members(s),on=active===s.id,hands=handsOf(mem);
+return i.jsxs("div",{className:"border-2 rounded-2xl p-3 space-y-2 "+(on?"border-emerald-500 bg-emerald-50/40":"border-slate-400 bg-slate-50"),children:[
+i.jsxs("div",{className:"flex flex-wrap items-center gap-2",children:[
+i.jsx("input",{type:"text",value:s.name||"",placeholder:"Nome dello stile (es. Spada e scudo)",onChange:e=>updStyle(s.id,{name:e.target.value}),className:"flex-1 min-w-[160px] border-b-2 border-dashed border-slate-500 bg-transparent text-base font-black text-slate-900 focus:outline-none focus:border-amber-500"}),
+on?i.jsx("span",{className:"px-2 py-1 rounded bg-emerald-600 text-white text-[11px] font-extrabold",children:"● IN USO"}):i.jsx("button",{onClick:()=>save({activeStyleId:s.id}),className:"px-2 py-1 rounded border border-emerald-600 text-emerald-700 text-[11px] font-extrabold cursor-pointer hover:bg-emerald-50",children:"Usa questo stile"}),
+i.jsxs("div",{className:"flex items-end gap-1",children:[i.jsxs("div",{style:{width:"54px"},children:[i.jsx("label",{className:lbl,children:"IBV stile"}),i.jsx("input",{type:"text",value:s.ibv===void 0?"":s.ibv,onChange:e=>updStyle(s.id,{ibv:e.target.value}),className:inp})]}),i.jsxs("div",{className:box+yel+" py-1",children:[i.jsx("div",{className:lbl+" text-amber-900",children:"Iniziativa"}),i.jsxs("div",{className:"flex items-center justify-center gap-1",children:[i.jsx("span",{className:"font-mono font-black text-lg text-amber-950",children:styleIni(s)}),iniBtn(s.name||"stile",styleIni(s))]})]})]}),
+i.jsx("button",{onClick:()=>rmStyle(s),className:"text-slate-400 hover:text-red-400 cursor-pointer text-xs",title:"Elimina lo stile",children:"✕"})]}),
+hands>2&&i.jsx("div",{className:"text-[11px] font-bold text-red-600",children:"⚠ "+hands+" mani occupate in questo stile: il massimo è 2"}),
+mem.length===0&&i.jsx("div",{className:"text-[11px] text-slate-500",children:"Aggiungi le righe di questo stile (per esempio l'arma e lo scudo)."}),
+mem.map(rowCard),
+i.jsx("button",{onClick:()=>addRow("1m",s.id),className:"px-3 py-1.5 rounded border border-slate-300 bg-white text-xs font-bold text-slate-900 cursor-pointer hover:bg-amber-100",children:"+ Aggiungi arma / scudo a questo stile"})
+]},s.id)},
+orderedStyles=[...styles].sort((a,b)=>(b.id===active?1:0)-(a.id===active?1:0)),
+cur=styles.find(s=>s.id===active);
 return i.jsxs("div",{className:"bg-white text-slate-950 border border-slate-300 rounded-xl shadow-xl p-6 space-y-4",children:[
 i.jsx("h4",{className:"text-sm font-bold text-slate-900 pb-2 border-b-2 border-slate-900",children:"Combattimento"}),
 i.jsxs("div",{className:"grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs text-center",children:[
 i.jsxs("div",{className:box,children:[i.jsx("div",{className:lbl,children:"Critici base"}),i.jsx("div",{className:"font-mono font-bold text-slate-900",children:m.critici})]}),
-i.jsxs("div",{className:box+" bg-amber-100 border-amber-400",title:"Dalla scheda (derivata + bonus), non modificabile qui",children:[i.jsx("div",{className:lbl+" text-amber-900",children:"INI base"}),i.jsx("div",{className:"font-mono font-bold text-amber-950",children:iniTot})]}),
+i.jsxs("div",{className:box+yel,title:"Dalla scheda (derivata + bonus), non modificabile qui",children:[i.jsx("div",{className:lbl+" text-amber-900",children:"INI base"}),i.jsx("div",{className:"font-mono font-bold text-amber-950",children:iniTot})]}),
 i.jsxs("div",{className:box,children:[i.jsx("div",{className:lbl,children:"Bonus danno (FOR)"}),i.jsx("div",{className:"font-mono font-bold text-slate-900",children:m.strDmgBonus>0?"+"+m.strDmgBonus:m.strDmgBonus})]}),
 i.jsxs("div",{className:box,children:[i.jsx("div",{className:lbl,children:"Danni a mani nude"}),i.jsx("div",{className:"font-mono font-bold text-slate-900",children:String(m.unarmedDamage)})]})]}),
-i.jsx("p",{className:"text-[10px] text-slate-500",children:"OCV = (DEX + skill + BIL) / 2 per difetto. DCV = lo stesso + DFB (+ DFB dello scudo equipaggiato). INI del rigo = INI base + IBV. Danni totali = danni base + bonus FOR (doppio per le armi a due mani). Gli equipaggiamenti sono lo stile di combattimento."}),
-i.jsxs("div",{className:"border border-slate-300 rounded-lg p-2 bg-slate-50",children:[i.jsxs("div",{className:"flex flex-wrap items-center gap-2",children:[i.jsx("span",{className:"text-[10px] font-bold uppercase tracking-wider text-slate-600",children:"Stile di combattimento"}),i.jsx("strong",{className:"text-sm text-slate-900",children:styleLabel}),hands>2&&i.jsx("span",{className:"text-[11px] font-bold text-red-600",children:"⚠ "+hands+" mani occupate: il massimo è 2"}),shieldDfb!==0&&i.jsx("span",{className:"text-[11px] text-slate-600",children:"DFB scudo "+(shieldDfb>0?"+":"")+shieldDfb+" sulla DCV"})]}),
-i.jsx("div",{className:"flex flex-wrap items-center gap-1.5 mt-1",children:eq.length===0?i.jsx("span",{className:"text-[11px] text-slate-500",children:"Spunta «Equipaggiato» sulle armi o sullo scudo che stai usando."}):eq.map((w,n)=>i.jsxs(i.Fragment,{children:[n>0&&i.jsx("span",{className:"text-slate-400 font-bold",children:"+"}),i.jsxs("span",{className:"px-2 py-0.5 rounded-full border border-emerald-500 bg-emerald-50 text-xs font-bold text-emerald-900",children:[w.name||w.skill||"Senza nome",kindOf(w)==="2m"?" (2 mani)":kindOf(w)==="scudo"?" (scudo)":""]})]},w.id))})]}),
-sec("Equipaggiate (stile in uso)",inUse),
-sec("Armi e scudi non in uso",offDuty),
-sec("Speciali",specials,"mosse e Lottare: non serve equipaggiarle"),
-i.jsxs("div",{className:"flex flex-wrap gap-2",children:[i.jsx("button",{onClick:()=>add("1m"),className:"px-3 py-1.5 rounded border border-slate-300 bg-white text-xs font-bold text-slate-900 cursor-pointer hover:bg-amber-100",children:"+ Arma / Scudo"}),i.jsx("button",{onClick:()=>add("speciale"),className:"px-3 py-1.5 rounded border border-slate-300 bg-white text-xs font-bold text-slate-900 cursor-pointer hover:bg-amber-100",children:"+ Mossa speciale"})]})
+i.jsx("p",{className:"text-[10px] text-slate-500",children:"OCV = (DEX + skill + BIL) / 2 per difetto. DCV = lo stesso + DFB. Ogni stile di combattimento (per esempio arma e scudo) ha una sola iniziativa: INI base + IBV dello stile. I danni restano separati per riga: danni base + bonus FOR (doppio per le armi a due mani)."}),
+cur&&i.jsxs("div",{className:"text-xs text-slate-700",children:["Stile in uso: ",i.jsx("strong",{children:cur.name||"senza nome"})," · iniziativa ",i.jsx("strong",{children:styleIni(cur)})]}),
+i.jsxs("div",{className:"space-y-2",children:[i.jsx("h5",{className:"text-xs font-bold uppercase tracking-wider text-slate-700 border-b border-slate-300 pb-1",children:"Stili di combattimento"}),
+styles.length===0&&i.jsx("p",{className:"text-[11px] text-slate-500",children:"Crea uno stile (per esempio «Spada e scudo» o «Due armi») e metti dentro le sue righe: ogni stile ha una sola iniziativa."}),
+orderedStyles.map(styleCard),
+i.jsx("button",{onClick:addStyle,className:"px-3 py-1.5 rounded border border-slate-300 bg-white text-xs font-bold text-slate-900 cursor-pointer hover:bg-amber-100",children:"＋ Nuovo stile di combattimento"})]}),
+loose.length>0&&i.jsxs("div",{className:"space-y-2",children:[i.jsxs("h5",{className:"text-xs font-bold uppercase tracking-wider text-slate-700 border-b border-slate-300 pb-1",children:["Righe senza stile",i.jsx("span",{className:"ml-2 text-[10px] font-normal normal-case text-slate-500",children:"scegli lo stile dal menu della riga"})]}),loose.map(rowCard)]}),
+i.jsxs("div",{className:"space-y-2",children:[i.jsxs("h5",{className:"text-xs font-bold uppercase tracking-wider text-slate-700 border-b border-slate-300 pb-1",children:["Speciali",i.jsx("span",{className:"ml-2 text-[10px] font-normal normal-case text-slate-500",children:"mosse e Lottare: non hanno uno stile"})]}),specials.map(rowCard),
+i.jsxs("div",{className:"flex flex-wrap gap-2",children:[i.jsx("button",{onClick:()=>addRow("speciale"),className:"px-3 py-1.5 rounded border border-slate-300 bg-white text-xs font-bold text-slate-900 cursor-pointer hover:bg-amber-100",children:"+ Mossa speciale"}),i.jsx("button",{onClick:()=>addRow("1m"),className:"px-3 py-1.5 rounded border border-slate-300 bg-white text-xs font-bold text-slate-900 cursor-pointer hover:bg-amber-100",children:"+ Arma / Scudo senza stile"})]})]})
 ]})
 }
 function mmPctList(o){
