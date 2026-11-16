@@ -77,6 +77,7 @@ function cleanTokens(list) {
       y: num(tk.y, -5000, 20000, 0),
     };
     if (tk.pgId) out.pgId = text(tk.pgId, 60);
+    if (tk.hid === true) out.hid = true;
     if (tk.ini !== undefined && tk.ini !== null && tk.ini !== '' && Number.isFinite(Number(tk.ini))) out.ini = Math.round(num(tk.ini, -999, 9999, 0));
     const wound = Math.round(num(tk.wound, 0, 3, 0));
     if (wound > 0) out.wound = wound;
@@ -142,6 +143,64 @@ function cleanDrawings(list) {
   return out;
 }
 
+// Nebbia di guerra: la mappa è tutta coperta, i tratti "rivela" (r) la scoprono e quelli "nascondi" (h) la ricoprono.
+// Ogni tratto è un pennello (w = spessore, p = spezzata di punti) oppure, con t:'r', un rettangolo p = [x1,y1,x2,y2].
+const FOG_BUDGET = 30000;
+const EMPTY_FOG = { on: false, strokes: [] };
+
+function cleanFog(f) {
+  const src = f && typeof f === 'object' ? f : {};
+  let budget = FOG_BUDGET;
+  const strokes = [];
+  for (const s of (Array.isArray(src.strokes) ? src.strokes : []).slice(0, 500)) {
+    const o = s && typeof s === 'object' ? s : {};
+    const m = o.m === 'h' ? 'h' : 'r';
+    const arr = Array.isArray(o.p) ? o.p.slice(0, 2000) : [];
+    if (o.t === 'r') {
+      if (arr.length < 4 || budget < 4) continue;
+      const v = arr.slice(0, 4).map((n) => Math.round(num(n, -5000, 20000, 0)));
+      budget -= 4;
+      strokes.push({ m, t: 'r', p: [Math.min(v[0], v[2]), Math.min(v[1], v[3]), Math.max(v[0], v[2]), Math.max(v[1], v[3])] });
+      continue;
+    }
+    const pts = [];
+    for (let k = 0; k + 1 < arr.length; k += 2) {
+      pts.push(Math.round(num(arr[k], -5000, 20000, 0)), Math.round(num(arr[k + 1], -5000, 20000, 0)));
+    }
+    if (pts.length < 4 || budget - pts.length < 0) continue;
+    budget -= pts.length;
+    strokes.push({ m, w: Math.round(num(o.w, 6, 600, 60)), p: pts });
+  }
+  return { on: src.on === true, strokes };
+}
+
+function segDist2(px, py, ax, ay, bx, by) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const l2 = dx * dx + dy * dy;
+  let t = l2 ? ((px - ax) * dx + (py - ay) * dy) / l2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  const cx = ax + t * dx - px;
+  const cy = ay + t * dy - py;
+  return cx * cx + cy * cy;
+}
+
+// Il punto è scoperto se l'ultimo tratto che lo tocca è un "rivela".
+function fogRevealed(strokes, x, y) {
+  for (let i = strokes.length - 1; i >= 0; i--) {
+    const s = strokes[i];
+    if (s.t === 'r') {
+      if (x >= s.p[0] && x <= s.p[2] && y >= s.p[1] && y <= s.p[3]) return s.m === 'r';
+      continue;
+    }
+    const r2 = (s.w / 2) * (s.w / 2);
+    for (let k = 0; k + 3 < s.p.length; k += 2) {
+      if (segDist2(x, y, s.p[k], s.p[k + 1], s.p[k + 2], s.p[k + 3]) <= r2) return s.m === 'r';
+    }
+  }
+  return false;
+}
+
 const publicOf = (rec) => ({
   id: rec.id,
   name: rec.name,
@@ -153,12 +212,27 @@ const publicOf = (rec) => ({
   effects: rec.effects || [],
   drawings: rec.drawings || [],
   turn: rec.turn || { order: [], active: '', round: 1 },
+  fog: rec.fog || EMPTY_FOG,
 });
+
+// Quello che vedono i giocatori: le pedine nascoste o coperte dalla nebbia NON vengono nemmeno inviate
+// (i PG ufficiali restano sempre visibili, a meno che il master non li nasconda a mano).
+function playerOf(rec) {
+  const pub = publicOf(rec);
+  const gs = (rec.grid && rec.grid.size) || DEFAULT_GRID.size;
+  pub.tokens = (rec.tokens || []).filter((t) => {
+    if (t.hid) return false;
+    if (!pub.fog.on || t.pgId) return true;
+    const half = (gs * t.size) / 2;
+    return fogRevealed(pub.fog.strokes, t.x + half, t.y + half);
+  });
+  return pub;
+}
 
 // Scrive la lavagna attiva e il suo "numero di versione": chi guarda legge solo quello (pochi byte)
 // e scarica lo stato completo soltanto quando il numero cambia.
 async function publish(rec) {
-  await kSet(PUBLIC, rec ? JSON.stringify(publicOf(rec)) : '');
+  await kSet(PUBLIC, rec ? JSON.stringify(playerOf(rec)) : '');
   await kSet(REV, rec ? rec.id + ':' + rec.rev : '');
 }
 
@@ -241,7 +315,7 @@ export default async function handler(req, res) {
         res.setHeader('Cache-Control', 'no-store');
         const rec = await getBoard(query.id);
         if (!rec) return res.status(404).json({ error: 'not_found' });
-        return res.status(200).json(publicOf(rec));
+        return res.status(200).json(playerOf(rec));
       }
       const raw = await kGet(PUBLIC);
       res.setHeader('Cache-Control', 'public, s-maxage=3, stale-while-revalidate=3');
@@ -351,6 +425,7 @@ export default async function handler(req, res) {
         effects: [],
         drawings: [],
         turn: { order: [], active: '', round: 1 },
+        fog: { on: false, strokes: [] },
       };
       await saveBoard(rec);
       if (!(await kGet(PUBLIC))) await publish(rec);
@@ -359,6 +434,9 @@ export default async function handler(req, res) {
 
     const rec = await getBoard(body.id);
     if (!rec) return res.status(404).json({ error: 'not_found' });
+
+    // il master legge la lavagna completa (senza filtri della nebbia)
+    if (action === 'get') return res.status(200).json(publicOf(rec));
 
     if (action === 'save') {
       const st = body.state && typeof body.state === 'object' ? body.state : {};
@@ -370,6 +448,7 @@ export default async function handler(req, res) {
         effects: cleanEffects(st.effects),
         drawings: cleanDrawings(st.drawings),
         turn: cleanTurn(st.turn),
+        fog: st.fog === undefined ? rec.fog || { on: false, strokes: [] } : cleanFog(st.fog),
         rev: rec.rev + 1,
         updatedAt: Date.now(),
       };
