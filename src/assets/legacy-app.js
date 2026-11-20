@@ -618,23 +618,41 @@ return[...best.values()].map(x=>x.a)
 const MM_PCOL=["#bae6fd","#bbf7d0","#fde68a","#ddd6fe","#fed7aa","#a7f3d0","#c7d2fe","#e9d5ff","#fef08a","#99f6e4","#d9f99d","#cbd5e1"];
 const MM_PGROUPS=[["Testa",/Testa/],["Spalle",/Spalla/],["Braccia",/Braccio/],["Mani",/Mano/],["Torace",/Petto|Tronco|Bacino/],["Cosce",/Coscia/],["Gambe",/Gamba/],["Piedi",/Piede/]];
 function mmEncOk(v){return/^\s*\d+([.,]\d+)?\s*$/.test(String(v==null?"":v))}
+function mmNameKey(s){return String(s==null?"":s).trim().toLowerCase()}
+function mmRingItems(o,existing){
+const rows=o.bodyProtections||[],groups=new Map();
+for(const r of rows){const vp=parseInt(r.ring,10)||0,desc=String(r.ringDesc||"").trim();if(!vp&&!desc)continue;const k=mmNameKey(desc||"anello")+"|"+vp;if(!groups.has(k))groups.set(k,{name:desc||"Anello",vp,locs:[]});groups.get(k).locs.push(r.location)}
+const out=[];let c=0;
+for(const g of groups.values()){const slots={};for(const l of g.locs)slots[l]=5;out.push({id:"pi_r"+c,name:g.name,vp:g.vp,enc:0,pct:0,locs:g.locs,slots,color:MM_PCOL[(existing.length+c)%MM_PCOL.length]});c++}
+return out
+}
 function mmMigrateProt(o){
-const rows=o.bodyProtections||[],out=[];let c=0;
+const rows=o.bodyProtections||[],groups=new Map(),out=[];
 for(const r of rows){for(let n=1;n<=4;n++){
 const vp=parseInt(r["prot"+n+"Vp"],10)||0,desc=String(r["prot"+n+"Desc"]||"").trim(),raw=r["prot"+n+"Enc"],pct=mmDec(r["prot"+n+"Pct"]),has=raw!==void 0&&raw!==null&&String(raw).trim()!==""&&String(raw).trim()!=="0",ok=!has||mmEncOk(raw);
 if(!vp&&!desc&&!has&&!pct)continue;
-out.push({id:"pi_m"+c,name:desc||"Pezzo",vp,enc:has&&ok?mmDec(raw):0,...(has&&!ok?{encBad:String(raw)}:{}),pct,locs:[r.location],slots:{[r.location]:n},color:MM_PCOL[c%MM_PCOL.length]});c++
+const key=desc?mmNameKey(desc)+"|"+vp:null,enc=has&&ok?mmDec(raw):0,bad=has&&!ok?String(raw):void 0,g=key?groups.get(key):null;
+if(g&&g.slots[r.location]===void 0){g.locs.push(r.location);g.slots[r.location]=n;g.enc=Math.max(g.enc,enc);g.pct=Math.max(g.pct,pct);if(bad!==void 0&&g.encBad===void 0)g.encBad=bad}
+else{const ng={name:desc||"Pezzo",vp,enc,pct,locs:[r.location],slots:{[r.location]:n},...(bad!==void 0?{encBad:bad}:{})};out.push(ng);if(key&&!groups.has(key))groups.set(key,ng)}
 }}
-return out
+out.forEach((g,k)=>{g.id="pi_m"+k;g.color=MM_PCOL[k%MM_PCOL.length]});
+return[...out,...mmRingItems(o,out)]
 }
-function mmProtItems(o){const list=Array.isArray(o.protectionItems)?o.protectionItems:mmMigrateProt(o);if(list.every(it=>it.slots))return list;const used={};for(const it of list)if(it.slots)for(const l in it.slots)used[l+"#"+it.slots[l]]=1;return list.map(it=>{if(it.slots)return it;const slots={};for(const l of it.locs){const n=[1,2,3,4].find(k=>!used[l+"#"+k]);if(n){slots[l]=n;used[l+"#"+n]=1}}return{...it,slots}})}
+function mmProtItems(o){
+let list;
+if(Array.isArray(o.protectionItems)){list=o.protectionItems;if(!o.ringMigrated)list=[...list,...mmRingItems(o,list)]}else list=mmMigrateProt(o);
+if(!list.every(it=>it.slots)){const used={};for(const it of list)if(it.slots)for(const l in it.slots)used[l+"#"+it.slots[l]]=1;list=list.map(it=>{if(it.slots)return it;const slots={};for(const l of it.locs){const n=[1,2,3,4,5].find(k=>!used[l+"#"+k]);if(n){slots[l]=n;used[l+"#"+n]=1}}return{...it,slots}})}
+const col={};
+return list.map(it=>{const k=mmNameKey(it.name);if(!k)return it;if(!col[k])col[k]=it.color;return col[k]===it.color?it:{...it,color:col[k]}})
+}
 function mmProtTotal(o){return Math.round(mmProtItems(o).reduce((a,it)=>a+(Number(it.enc)||0),0)*100)/100}
 function mmProtRows(o,items){
 const base=o.bodyProtections&&o.bodyProtections.length?o.bodyProtections:Db();
 return base.map(r=>{
 const mine=items.filter(it=>it.locs.indexOf(r.location)>=0),nr={...r};
 for(let n=1;n<=4;n++){const it=mine.find(x=>x.slots&&x.slots[r.location]===n);nr["prot"+n+"Desc"]=it?it.name:"";nr["prot"+n+"Vp"]=it?it.vp:0;nr["prot"+n+"Enc"]=it?it.enc:0;nr["prot"+n+"Pct"]=it&&it.pct?it.pct:""}
-nr.totalVp=mine.reduce((a,it)=>a+(it.vp||0),0)+(parseInt(r.ring,10)||0);
+const rg=mine.find(x=>x.slots&&x.slots[r.location]===5);nr.ring=rg?rg.vp:0;nr.ringDesc=rg?rg.name:"";
+nr.totalVp=mine.reduce((a,it)=>a+(it.vp||0),0);
 nr.totalEnc=0;
 nr.totalPct=Math.round(mine.reduce((a,it)=>a+(Number(it.pct)||0),0)*100)/100;
 return nr})
@@ -643,11 +661,9 @@ function MmProtPage({o,d,ingCat}){
 const items=mmProtItems(o),[dlg,setDlg]=Se.useState(null),[headRoll,setHeadRoll]=Se.useState(!1),[fix,setFix]=Se.useState({}),
 headLoc=(Op.find(x=>/Testa/.test(x.location))||{}).location,
 at=loc=>items.filter(it=>it.locs.indexOf(loc)>=0),
-save=list=>d({...o,protectionItems:list,bodyProtections:mmProtRows(o,list),updatedAt:Date.now()}),
+save=list=>d({...o,protectionItems:list,ringMigrated:!0,bodyProtections:mmProtRows(o,list),updatedAt:Date.now()}),
 setVp=(id,v)=>save(items.map(it=>it.id===id?{...it,vp:parseInt(String(v).replace(/\D/g,""),10)||0}:it)),
 rm=it=>{if(confirm("Rimuovere «"+it.name+"» da tutte le zone che copre?"))save(items.filter(x=>x.id!==it.id))},
-setRing=(loc,field,val)=>{const rows=(o.bodyProtections&&o.bodyProtections.length?o.bodyProtections:Db()).map(r=>r.location===loc?{...r,[field]:val}:r),o2={...o,bodyProtections:rows};d({...o2,protectionItems:items,bodyProtections:mmProtRows(o2,items),updatedAt:Date.now()})},
-rowOf=loc=>(o.bodyProtections||[]).find(x=>x.location===loc)||{},
 totalEnc=Math.round(items.reduce((a,it)=>a+(Number(it.enc)||0),0)*100)/100,
 soglie=(ingCat&&ingCat.values)||[],over=soglie.filter(s=>totalEnc>s).length,
 headItems=headLoc?at(headLoc):[],
@@ -657,29 +673,28 @@ bad=items.filter(it=>it.encBad!==void 0),
 zonesOf=it=>it.locs.map(l=>l.slice(l.indexOf(" ")+1)).join(", "),
 D=dlg,hasHead=!!D&&D.locs.some(l=>/Testa/.test(l)),
 valid=!!D&&D.name.trim()!==""&&mmEncOk(D.enc)&&/^\d+$/.test(String(D.vp).trim())&&D.locs.length>0&&(!hasHead||String(D.pct).trim()===""||mmEncOk(D.pct)),
-add=()=>{setDlg({...D,tried:!0});if(!valid)return;const used=items.map(x=>x.color),col=MM_PCOL.find(c=>used.indexOf(c)<0)||MM_PCOL[items.length%MM_PCOL.length];const taken=(loc,n)=>items.some(x=>x.slots&&x.slots[loc]===n),common=[1,2,3,4].find(n=>D.locs.every(l=>!taken(l,n))),slots={};for(const l of D.locs)slots[l]=common||[1,2,3,4].find(n=>!taken(l,n));save([...items,{id:"pi_"+Date.now(),name:D.name.trim(),vp:parseInt(D.vp,10),enc:mmDec(D.enc),pct:hasHead?mmDec(D.pct):0,locs:D.locs,slots,color:col}]);setDlg(null)},
+add=()=>{setDlg({...D,tried:!0});if(!valid)return;const used=items.map(x=>x.color),same=items.find(x=>mmNameKey(x.name)===mmNameKey(D.name)),col=(same&&same.color)||MM_PCOL.find(c=>used.indexOf(c)<0)||MM_PCOL[items.length%MM_PCOL.length];const taken=(loc,n)=>items.some(x=>x.slots&&x.slots[loc]===n),common=[1,2,3,4,5].find(n=>D.locs.every(l=>!taken(l,n))),slots={};for(const l of D.locs)slots[l]=common||[1,2,3,4,5].find(n=>!taken(l,n));save([...items,{id:"pi_"+Date.now(),name:D.name.trim(),vp:parseInt(D.vp,10),enc:mmDec(D.enc),pct:hasHead?mmDec(D.pct):0,locs:D.locs,slots,color:col}]);setDlg(null)},
 toggleLoc=loc=>setDlg({...D,locs:D.locs.indexOf(loc)>=0?D.locs.filter(x=>x!==loc):[...D.locs,loc]}),
-toggleGroup=re=>{const ls=Op.filter(x=>re.test(x.location)&&at(x.location).length<4).map(x=>x.location),all=ls.length>0&&ls.every(l=>D.locs.indexOf(l)>=0);setDlg({...D,locs:all?D.locs.filter(l=>ls.indexOf(l)<0):[...new Set([...D.locs,...ls])]})},
+toggleGroup=re=>{const ls=Op.filter(x=>re.test(x.location)&&at(x.location).length<5).map(x=>x.location),all=ls.length>0&&ls.every(l=>D.locs.indexOf(l)>=0);setDlg({...D,locs:all?D.locs.filter(l=>ls.indexOf(l)<0):[...new Set([...D.locs,...ls])]})},
 inp={border:"1px solid #94a3b8",borderRadius:"6px",padding:"6px 8px",fontSize:"13px",width:"100%",background:"#fff"},
 errB=(cond)=>D&&D.tried&&cond?{border:"2px solid #dc2626",background:"#fef2f2"}:{},
 btn="px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer border border-slate-300";
 return i.jsxs("div",{className:"bg-white text-slate-950 border border-slate-300 rounded-xl shadow-xl p-6 space-y-3",children:[
 i.jsxs("div",{className:"flex items-center justify-between pb-2 border-b-2 border-slate-900",children:[i.jsx("h4",{className:"text-sm font-bold text-slate-900",children:"Protezioni Corporee, Armature & Ingombro"}),i.jsxs("div",{className:"text-right",children:[i.jsxs("div",{className:"text-[10px] font-bold uppercase text-slate-600",children:["Categoria Ingombro: ",ingCat.letter?"Cat. "+ingCat.letter:"Misto"]}),i.jsxs("div",{className:"text-[10px] font-mono text-slate-500",children:["Soglie 1/2/3: ",soglie.join("/")]})]})]}),
-i.jsx("p",{className:"text-[11px] text-slate-500",children:"Aggiungi un oggetto (es. spalline, elmo, corazza): scegli dove va, e il programma lo mette da solo nella griglia, con un colore, senza finire sopra gli altri. Un oggetto conta come UN solo ingombro anche se copre più zone. Nella griglia puoi solo cambiarne il VP (per i danni che scalano la protezione) o rimuoverlo per intero; descrizione e ingombro sono bloccati. Sulla testa ogni oggetto può avere una percentuale (%): la somma è la probabilità di annullare il raddoppio dei danni alla testa; con il talento Competenza elmi si aggiunge in automatico +3% (se c'è almeno un oggetto sulla testa)."}),
+i.jsx("p",{className:"text-[11px] text-slate-500",children:"Aggiungi un oggetto (es. spalline, elmo, corazza): scegli dove va, e il programma lo mette da solo nella griglia, con un colore, senza finire sopra gli altri. Un oggetto conta come UN solo ingombro anche se copre più zone. Il 5° slot è pensato per l'anello e oggetti simili, che di solito coprono tutto (usa «Tutto»). Nella griglia puoi solo cambiarne il VP (per i danni che scalano la protezione) o rimuoverlo per intero; descrizione e ingombro sono bloccati. Sulla testa ogni oggetto può avere una percentuale (%): la somma è la probabilità di annullare il raddoppio dei danni alla testa; con il talento Competenza elmi si aggiunge in automatico +3% (se c'è almeno un oggetto sulla testa)."}),
 i.jsxs("div",{className:"flex flex-wrap items-center gap-2",children:[i.jsx("button",{onClick:()=>setDlg({name:"",vp:"",enc:"",pct:"",locs:[],tried:!1}),className:"px-3 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-extrabold cursor-pointer",children:"＋ Aggiungi protezione"}),i.jsx("span",{className:"text-[11px] text-slate-500",children:items.length+" oggetti · ingombro totale "+totalEnc})]}),
 bad.length>0&&i.jsx("div",{style:{background:"#fee2e2",border:"2px solid #dc2626",color:"#991b1b",borderRadius:"8px",padding:"6px 10px",fontSize:"12px",fontWeight:700},children:"⚠ "+bad.length+(bad.length===1?" oggetto ha":" oggetti hanno")+" l'ingombro scritto a testo invece che come numero (evidenziati in rosso). Correggi dalla lista sotto la griglia."}),
 i.jsx("div",{className:"overflow-x-auto",children:i.jsxs("table",{className:"w-full text-[10px] border-collapse border border-slate-900 text-center",children:[
-i.jsx("thead",{children:i.jsxs("tr",{className:"bg-slate-200 text-slate-950 font-bold border-b border-slate-900",children:[i.jsx("th",{className:"p-1 border-r border-slate-700 w-14",children:"Hit"}),i.jsx("th",{className:"p-1 border-r border-slate-700 w-16",children:"Zona"}),...[1,2,3,4].map(n=>i.jsx("th",{className:"p-1 border-r border-slate-300 w-28",children:"Oggetto "+n},n)),i.jsx("th",{className:"p-1 border-r border-slate-300 w-20",children:"Anello (Descr. / Val.)"}),i.jsx("th",{className:"p-1 bg-slate-300 w-12",children:"VP Tot"})]})}),
+i.jsx("thead",{children:i.jsxs("tr",{className:"bg-slate-200 text-slate-950 font-bold border-b border-slate-900",children:[i.jsx("th",{className:"p-1 border-r border-slate-700 w-14",children:"Hit"}),i.jsx("th",{className:"p-1 border-r border-slate-700 w-16",children:"Zona"}),...[1,2,3,4,5].map(n=>i.jsx("th",{className:"p-1 border-r border-slate-300 w-28",children:n===5?"Oggetto 5 (anello…)":"Oggetto "+n},n)),i.jsx("th",{className:"p-1 bg-slate-300 w-12",children:"VP Tot"})]})}),
 i.jsx("tbody",{children:Op.map(({location:loc,hitNumber:hitNum})=>{
-const row=rowOf(loc),here=at(loc),vpTot=here.reduce((a,it)=>a+(it.vp||0),0)+(parseInt(row.ring,10)||0);
+const here=at(loc),vpTot=here.reduce((a,it)=>a+(it.vp||0),0);
 return i.jsxs("tr",{className:"border-b border-slate-300",children:[
 i.jsx("td",{className:"p-0.5 border-r border-slate-200 font-mono bg-slate-50 align-top",children:hitNum}),
 i.jsx("td",{className:"p-0.5 border-r border-slate-200 font-bold text-left px-1 align-top",children:loc.slice(hitNum.length+1)}),
-...[1,2,3,4].map(n=>{const it=here.find(x=>x.slots&&x.slots[loc]===n),isBad=it&&it.encBad!==void 0;return i.jsx("td",{className:"p-0.5 border-r border-slate-200 align-top",children:it?i.jsxs("div",{title:it.name+" — Ing "+(isBad?"?":it.enc)+" (oggetto unico, copre "+it.locs.length+" zone)",style:{background:isBad?"#fecaca":it.color,border:isBad?"2px solid #dc2626":"1px solid rgba(0,0,0,0.25)",borderRadius:"6px",padding:"2px 3px",position:"relative",textAlign:"left"},children:[
+...[1,2,3,4,5].map(n=>{const it=here.find(x=>x.slots&&x.slots[loc]===n),isBad=it&&it.encBad!==void 0;return i.jsx("td",{className:"p-0.5 border-r border-slate-200 align-top",children:it?i.jsxs("div",{title:it.name+" — Ing "+(isBad?"?":it.enc)+" (oggetto unico, copre "+it.locs.length+" zone)",style:{background:isBad?"#fecaca":it.color,border:isBad?"2px solid #dc2626":"1px solid rgba(0,0,0,0.25)",borderRadius:"6px",padding:"2px 3px",position:"relative",textAlign:"left"},children:[
 i.jsx("div",{style:{fontSize:"9px",fontWeight:700,lineHeight:"1.15",paddingRight:"12px",wordBreak:"break-word"},children:it.name}),
 i.jsxs("div",{style:{display:"flex",alignItems:"center",gap:"3px",fontSize:"9px",marginTop:"1px",flexWrap:"wrap"},children:["VP",i.jsx("input",{type:"text",inputMode:"numeric",value:it.vp||"",placeholder:"0",onChange:e=>setVp(it.id,e.target.value),title:"Modifica il VP (per i danni che scalano la protezione)",style:{width:"26px",textAlign:"center",background:"rgba(255,255,255,0.75)",border:"1px solid rgba(0,0,0,0.25)",borderRadius:"3px",fontSize:"9px",padding:"0 1px"}}),i.jsx("span",{style:{fontWeight:800,color:isBad?"#b91c1c":void 0},children:"I"+(isBad?"?":it.enc)}),loc===headLoc&&it.pct>0&&i.jsx("span",{style:{color:"#92400e",fontWeight:800},children:it.pct+"%"})]}),
 i.jsx("button",{onClick:()=>rm(it),title:"Rimuovi l'oggetto da tutte le zone",style:{position:"absolute",top:0,right:2,fontSize:"10px",color:"#7f1d1d",cursor:"pointer",background:"none",border:"none",padding:0},children:"✕"})]}):i.jsx("div",{style:{color:"#cbd5e1",fontSize:"9px",textAlign:"center",padding:"6px 0"},children:"—"})},n)}),
-i.jsx("td",{className:"p-0.5 border-r border-slate-200 align-top",children:i.jsxs("div",{className:"space-y-0.5",children:[i.jsx("textarea",{rows:1,placeholder:"Descrizione",value:row.ringDesc||"",ref:mmAutoH,style:{resize:"none",overflow:"hidden"},onInput:e=>mmAutoH(e.target),onChange:e=>setRing(loc,"ringDesc",e.target.value),className:"w-full bg-transparent text-[9px] leading-tight text-slate-700 focus:outline-none border-b border-dotted border-slate-300 px-0.5 block"}),i.jsx("input",{type:"text",placeholder:"Valore",value:row.ring||"",onChange:e=>setRing(loc,"ring",e.target.value),className:"w-10 bg-transparent text-center text-[9px] focus:outline-none block mx-auto"})]})}),
 i.jsx("td",{className:"p-0.5 font-mono font-bold bg-slate-100 align-top",children:vpTot})
 ]},loc)})})]})}),
 items.length>0&&i.jsxs("div",{className:"space-y-1",children:[i.jsx("div",{className:"text-[10px] font-bold uppercase text-slate-600",children:"Oggetti indossati ("+items.length+")"}),...items.map(it=>{const isBad=it.encBad!==void 0;return i.jsxs("div",{style:{display:"flex",flexWrap:"wrap",alignItems:"center",gap:"6px",fontSize:"11px",padding:"3px 6px",borderRadius:"6px",background:isBad?"#fee2e2":"#f8fafc",border:isBad?"2px solid #dc2626":"1px solid #e2e8f0"},children:[
@@ -699,8 +714,8 @@ i.jsxs("label",{className:"block text-xs font-bold",children:["Descrizione",i.js
 i.jsxs("div",{className:"flex gap-2",children:[i.jsxs("label",{className:"block text-xs font-bold flex-1",children:["VP (protezione)",i.jsx("input",{type:"text",inputMode:"numeric",value:D.vp,placeholder:"es. 2",onChange:e=>setDlg({...D,vp:e.target.value.replace(/\D/g,"")}),style:{...inp,...errB(!/^\d+$/.test(String(D.vp).trim()))}})]}),i.jsxs("label",{className:"block text-xs font-bold flex-1",children:["Ingombro (numero)",i.jsx("input",{type:"text",inputMode:"decimal",value:D.enc,placeholder:"es. 2 o 1,5",onChange:e=>setDlg({...D,enc:e.target.value.replace(/[^0-9.,]/g,"")}),style:{...inp,...errB(!mmEncOk(D.enc))}})]})]}),
 hasHead&&i.jsxs("label",{className:"block text-xs font-bold",children:["% per annullare il raddoppio dei danni alla testa (facoltativo)",i.jsx("input",{type:"text",inputMode:"decimal",value:D.pct,placeholder:"es. 10",onChange:e=>setDlg({...D,pct:e.target.value.replace(/[^0-9.,]/g,"")}),style:{...inp,...errB(String(D.pct).trim()!==""&&!mmEncOk(D.pct))}})]}),
 i.jsxs("div",{children:[i.jsx("div",{className:"text-xs font-bold mb-1",style:D.tried&&D.locs.length===0?{color:"#b91c1c"}:void 0,children:"Dove va (tocca le zone che copre)"+(D.tried&&D.locs.length===0?" — scegline almeno una":"")}),
-i.jsx("div",{className:"flex flex-wrap gap-1 mb-2",children:MM_PGROUPS.map(([nm,re])=>i.jsx("button",{onClick:()=>toggleGroup(re),className:btn+" bg-slate-100",style:{padding:"2px 8px",fontSize:"11px"},title:"Seleziona o deseleziona tutte le zone: "+nm,children:nm},nm))}),
-i.jsx("div",{className:"space-y-1",children:MM_PGROUPS.map(([nm,re])=>i.jsxs("div",{className:"flex flex-wrap items-center gap-1",children:[i.jsx("span",{className:"text-[10px] font-bold uppercase text-slate-500",style:{width:"58px"},children:nm}),...Op.filter(x=>re.test(x.location)).map(x=>{const full=at(x.location).length>=4,on=D.locs.indexOf(x.location)>=0;return i.jsx("button",{key:x.location,disabled:full,onClick:()=>toggleLoc(x.location),title:full?"Questa zona ha già 4 oggetti":x.location,style:{padding:"3px 8px",borderRadius:"8px",fontSize:"11px",fontWeight:700,border:on?"2px solid #d97706":"1px solid #cbd5e1",background:on?"#fde68a":"#fff",cursor:full?"not-allowed":"pointer",opacity:full?0.4:1},children:x.hitNumber+" "+x.location.slice(x.hitNumber.length+1)},x.location)})]},nm))})]}),
+i.jsx("div",{className:"flex flex-wrap gap-1 mb-2",children:[i.jsx("button",{key:"all",onClick:()=>toggleGroup(/./),className:btn+" bg-amber-100",style:{padding:"2px 10px",fontSize:"11px",fontWeight:800},title:"Seleziona o deseleziona tutto il corpo (es. un anello)",children:"Tutto"}),...MM_PGROUPS.map(([nm,re])=>i.jsx("button",{onClick:()=>toggleGroup(re),className:btn+" bg-slate-100",style:{padding:"2px 8px",fontSize:"11px"},title:"Seleziona o deseleziona tutte le zone: "+nm,children:nm},nm))]}),
+i.jsx("div",{className:"space-y-1",children:MM_PGROUPS.map(([nm,re])=>i.jsxs("div",{className:"flex flex-wrap items-center gap-1",children:[i.jsx("span",{className:"text-[10px] font-bold uppercase text-slate-500",style:{width:"58px"},children:nm}),...Op.filter(x=>re.test(x.location)).map(x=>{const full=at(x.location).length>=5,on=D.locs.indexOf(x.location)>=0;return i.jsx("button",{key:x.location,disabled:full,onClick:()=>toggleLoc(x.location),title:full?"Questa zona ha già 5 oggetti":x.location,style:{padding:"3px 8px",borderRadius:"8px",fontSize:"11px",fontWeight:700,border:on?"2px solid #d97706":"1px solid #cbd5e1",background:on?"#fde68a":"#fff",cursor:full?"not-allowed":"pointer",opacity:full?0.4:1},children:x.hitNumber+" "+x.location.slice(x.hitNumber.length+1)},x.location)})]},nm))})]}),
 i.jsx("div",{className:"flex gap-2 justify-end",children:[i.jsx("button",{key:"c",onClick:()=>setDlg(null),className:btn,children:"Annulla"}),i.jsx("button",{key:"a",onClick:add,className:"px-4 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-extrabold cursor-pointer",children:"Aggiungi"})]})
 ]})})
 ]})
