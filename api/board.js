@@ -6,19 +6,27 @@
 //  - un solo master alla volta: un nuovo accesso master prende il controllo e il vecchio passa in sola lettura
 import crypto from 'node:crypto';
 import { promisify } from 'node:util';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { hGetAll, hGet, hSet, hDel, kGet, kGetMany, kSet, storeKind, get as getPg } from './_store.js';
 
 const scrypt = promisify(crypto.scrypt);
 
-const BOARDS = 'mm:boards';
-const IMGS = 'mm:board_imgs';
-const PUBLIC = 'mm:board_public';
-const REV = 'mm:board_rev';
 // Il master collegato manda un segnale ogni 30 secondi: se non ne arrivano da 100 secondi
 // consideriamo che non ci sia nessuno e chi guarda smette di chiedere aggiornamenti di continuo.
-const LIVE = 'mm:board_live';
 const LIVE_MS = 100_000;
-const LOCK = 'mm:board_lock';
+// Due "stanze" separate: quella ufficiale e quella di prova (?room=prova). Hanno lavagne, mappe,
+// stato attivo e accesso master propri: quello che si fa in prova non tocca nulla di ufficiale.
+const roomKeys = (prefix) => ({
+  BOARDS: prefix + 'boards',
+  IMGS: prefix + 'board_imgs',
+  PUBLIC: prefix + 'board_public',
+  REV: prefix + 'board_rev',
+  LIVE: prefix + 'board_live',
+  LOCK: prefix + 'board_lock',
+});
+const ROOMS = { official: roomKeys('mm:'), prova: roomKeys('mm:prova_') };
+const roomCtx = new AsyncLocalStorage();
+const K = () => roomCtx.getStore() || ROOMS.official;
 const MAX_BOARDS = 20;
 const MAX_IMG_CHARS = 3_400_000;
 const MAX_STATE_CHARS = 600_000;
@@ -313,13 +321,13 @@ function playerOf(rec) {
 // Scrive la lavagna attiva e il suo "numero di versione": chi guarda legge solo quello (pochi byte)
 // e scarica lo stato completo soltanto quando il numero cambia.
 async function publish(rec) {
-  await kSet(PUBLIC, rec ? JSON.stringify(playerOf(rec)) : '');
-  await kSet(REV, rec ? rec.id + ':' + rec.rev : '');
+  await kSet(K().PUBLIC, rec ? JSON.stringify(playerOf(rec)) : '');
+  await kSet(K().REV, rec ? rec.id + ':' + rec.rev : '');
 }
 
 async function isMaster(token) {
   if (!token) return false;
-  const raw = await kGet(LOCK);
+  const raw = await kGet(K().LOCK);
   if (!raw) return false;
   try {
     const a = Buffer.from(String(JSON.parse(raw).token));
@@ -331,16 +339,16 @@ async function isMaster(token) {
 }
 
 async function getBoard(id) {
-  const raw = id && ID_RE.test(String(id)) ? await hGet(BOARDS, String(id)) : null;
+  const raw = id && ID_RE.test(String(id)) ? await hGet(K().BOARDS, String(id)) : null;
   return raw ? JSON.parse(raw) : null;
 }
 
 async function saveBoard(rec) {
-  await hSet(BOARDS, rec.id, JSON.stringify(rec));
+  await hSet(K().BOARDS, rec.id, JSON.stringify(rec));
 }
 
 async function publishIfActive(rec) {
-  const raw = await kGet(PUBLIC);
+  const raw = await kGet(K().PUBLIC);
   let activeId = null;
   try {
     activeId = raw ? JSON.parse(raw).id : null;
@@ -350,7 +358,12 @@ async function publishIfActive(rec) {
   if (activeId === rec.id) await publish(rec);
 }
 
-export default async function handler(req, res) {
+export default function handler(req, res) {
+  const room = String((req.query || {}).room || '') === 'prova' ? ROOMS.prova : ROOMS.official;
+  return roomCtx.run(room, () => main(req, res));
+}
+
+async function main(req, res) {
   const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || 'unknown';
   const query = req.query || {};
   const method = req.method;
@@ -366,7 +379,7 @@ export default async function handler(req, res) {
       if (query.img) {
         const id = String(query.img);
         if (!ID_RE.test(id)) return res.status(404).json({ error: 'not_found' });
-        const data = await hGet(IMGS, id);
+        const data = await hGet(K().IMGS, id);
         if (!data || !data.startsWith(JPEG_PREFIX)) return res.status(404).json({ error: 'not_found' });
         const buf = Buffer.from(data.slice(JPEG_PREFIX.length), 'base64');
         res.statusCode = 200;
@@ -376,16 +389,16 @@ export default async function handler(req, res) {
         return res.end(buf);
       }
       if (query.poll) {
-        const [revRaw, liveRaw] = await kGetMany([REV, LIVE]);
+        const [revRaw, liveRaw] = await kGetMany([K().REV, K().LIVE]);
         let k = revRaw;
         const live = Date.now() - Number(liveRaw || 0) < LIVE_MS;
         if (!k) {
           // lavagne create prima dell'introduzione del numero di versione: lo ricava e lo salva
-          const rawPublic = await kGet(PUBLIC);
+          const rawPublic = await kGet(K().PUBLIC);
           if (rawPublic) {
             const cur = JSON.parse(rawPublic);
             k = cur.id + ':' + cur.rev;
-            await kSet(REV, k);
+            await kSet(K().REV, k);
           }
         }
         // master collegato: risposta condivisa per 3 secondi; non collegato: per 10, così chi guarda non consuma quasi nulla
@@ -398,7 +411,7 @@ export default async function handler(req, res) {
         if (!rec) return res.status(404).json({ error: 'not_found' });
         return res.status(200).json(playerOf(rec));
       }
-      const raw = await kGet(PUBLIC);
+      const raw = await kGet(K().PUBLIC);
       res.setHeader('Cache-Control', 'public, s-maxage=3, stale-while-revalidate=3');
       return res.status(200).json(raw ? JSON.parse(raw) : { empty: true });
     }
@@ -444,8 +457,8 @@ export default async function handler(req, res) {
         return res.status(401).json({ error: 'bad_password' });
       }
       const token = crypto.randomBytes(16).toString('hex');
-      await kSet(LOCK, JSON.stringify({ token, at: Date.now() }));
-      await kSet(LIVE, String(Date.now()));
+      await kSet(K().LOCK, JSON.stringify({ token, at: Date.now() }));
+      await kSet(K().LIVE, String(Date.now()));
       return res.status(200).json({ token });
     }
 
@@ -467,7 +480,7 @@ export default async function handler(req, res) {
       if (body.mov !== undefined && Number.isFinite(Number(body.mov))) upd.mov = Math.round(num(body.mov, 0, 999, 0) * 10) / 10;
       const now = Date.now();
       let updated = 0;
-      for (const raw of Object.values(await hGetAll(BOARDS))) {
+      for (const raw of Object.values(await hGetAll(K().BOARDS))) {
         let b;
         try {
           b = JSON.parse(raw);
@@ -514,22 +527,22 @@ export default async function handler(req, res) {
 
     // segnale di presenza del master (ogni 30 secondi) e uscita
     if (action === 'ping') {
-      await kSet(LIVE, String(Date.now()));
+      await kSet(K().LIVE, String(Date.now()));
       return res.status(200).json({ ok: true });
     }
     if (action === 'away') {
-      await kSet(LIVE, '0');
+      await kSet(K().LIVE, '0');
       return res.status(200).json({ ok: true });
     }
     if (action === 'logout') {
-      await kSet(LIVE, '0');
-      await kSet(LOCK, '');
+      await kSet(K().LIVE, '0');
+      await kSet(K().LOCK, '');
       return res.status(200).json({ ok: true });
     }
 
     if (action === 'list') {
-      const all = await hGetAll(BOARDS);
-      const rawPublic = await kGet(PUBLIC);
+      const all = await hGetAll(K().BOARDS);
+      const rawPublic = await kGet(K().PUBLIC);
       let activeId = null;
       try {
         activeId = rawPublic ? JSON.parse(rawPublic).id : null;
@@ -551,7 +564,7 @@ export default async function handler(req, res) {
     }
 
     if (action === 'create') {
-      const all = await hGetAll(BOARDS);
+      const all = await hGetAll(K().BOARDS);
       if (Object.keys(all).length >= MAX_BOARDS) return res.status(400).json({ error: 'too_many' });
       const id = 'bd_' + crypto.randomBytes(5).toString('hex');
       const now = Date.now();
@@ -571,7 +584,7 @@ export default async function handler(req, res) {
         symLabels: true,
       };
       await saveBoard(rec);
-      if (!(await kGet(PUBLIC))) await publish(rec);
+      if (!(await kGet(K().PUBLIC))) await publish(rec);
       return res.status(200).json({ id });
     }
 
@@ -610,7 +623,7 @@ export default async function handler(req, res) {
       const w = Math.round(num(body.w, 100, 8000, 0));
       const h = Math.round(num(body.h, 100, 8000, 0));
       if (!w || !h) return res.status(400).json({ error: 'bad_image' });
-      await hSet(IMGS, rec.id, image);
+      await hSet(K().IMGS, rec.id, image);
       const next = { ...rec, bg: { v: Date.now(), w, h }, rev: rec.rev + 1, updatedAt: Date.now() };
       await saveBoard(next);
       await publishIfActive(next);
@@ -618,7 +631,7 @@ export default async function handler(req, res) {
     }
 
     if (action === 'clearBg') {
-      await hDel(IMGS, rec.id);
+      await hDel(K().IMGS, rec.id);
       const next = { ...rec, bg: null, rev: rec.rev + 1, updatedAt: Date.now() };
       await saveBoard(next);
       await publishIfActive(next);
@@ -631,9 +644,9 @@ export default async function handler(req, res) {
     }
 
     if (action === 'delete') {
-      await hDel(BOARDS, rec.id);
-      await hDel(IMGS, rec.id);
-      const rawPublic = await kGet(PUBLIC);
+      await hDel(K().BOARDS, rec.id);
+      await hDel(K().IMGS, rec.id);
+      const rawPublic = await kGet(K().PUBLIC);
       let activeId = null;
       try {
         activeId = rawPublic ? JSON.parse(rawPublic).id : null;
@@ -641,7 +654,7 @@ export default async function handler(req, res) {
         activeId = null;
       }
       if (activeId === rec.id) {
-        const rest = await hGetAll(BOARDS);
+        const rest = await hGetAll(K().BOARDS);
         const first = Object.values(rest)[0];
         await publish(first ? JSON.parse(first) : null);
       }
