@@ -96,6 +96,8 @@ function cleanTokens(list) {
     if (iniAt > 0) out.iniAt = iniAt;
     const syncAt = Math.round(num(tk.syncAt, 0, 9e15, 0));
     if (syncAt > 0) out.syncAt = syncAt;
+    const pv = Math.round(num(tk.pv, 0, 1e9, 0));
+    if (pv > 0) out.pv = pv;
     if (tk.ini !== undefined && tk.ini !== null && tk.ini !== '' && Number.isFinite(Number(tk.ini))) out.ini = Math.round(num(tk.ini, -999, 9999, 0));
     const wound = Math.round(num(tk.wound, 0, 3, 0));
     if (wound > 0) out.wound = wound;
@@ -115,6 +117,11 @@ function keepNewer(incoming, stored) {
     const o = old.get(t.id);
     if (!o || !t.pgId) return t;
     const r = { ...t };
+    if ((o.pv || 0) > (t.pv || 0)) {
+      r.pv = o.pv;
+      r.x = o.x;
+      r.y = o.y;
+    }
     if ((o.iniAt || 0) > (t.iniAt || 0)) {
       r.iniAt = o.iniAt;
       if (o.ini !== undefined) r.ini = o.ini;
@@ -520,6 +527,42 @@ async function main(req, res) {
         updated++;
       }
       return res.status(200).json({ ok: true, updated });
+    }
+
+    // ---- un giocatore sposta la propria pedina sulla lavagna attiva (password del suo PG) ----
+    if (action === 'pgMove') {
+      const pgId = String(body.pgId || '');
+      const tokenId = String(body.tokenId || '');
+      const x = Number(body.x);
+      const y = Number(body.y);
+      if (!/^[A-Za-z0-9_-]{6,60}$/.test(pgId) || !tokenId || !Number.isFinite(x) || !Number.isFinite(y)) return res.status(400).json({ error: 'bad_request' });
+      if ((fails.get(ip) || []).filter((v) => Date.now() - v < 600_000).length >= 10) return res.status(429).json({ error: 'rate_limited' });
+      const pg = await getPg(pgId);
+      if (!pg || !(await pgPasswordOk(pg, body.password))) {
+        limited(fails, ip, 1000, 600_000);
+        return res.status(401).json({ error: 'bad_password' });
+      }
+      let activeId = null;
+      try {
+        activeId = JSON.parse(await kGet(K().PUBLIC)).id;
+      } catch {
+        activeId = null;
+      }
+      const b = await getBoard(activeId);
+      if (!b) return res.status(404).json({ error: 'not_found' });
+      let pv = 0;
+      b.tokens = (b.tokens || []).map((tk) => {
+        // solo la propria pedina, e non se il master l'ha nascosta
+        if (tk.id !== tokenId || tk.pgId !== pgId || tk.hid) return tk;
+        pv = (tk.pv || 0) + 1;
+        return { ...tk, x: Math.round(num(x, -5000, 20000, 0)), y: Math.round(num(y, -5000, 20000, 0)), pv };
+      });
+      if (!pv) return res.status(404).json({ error: 'not_on_board' });
+      b.rev = (b.rev || 1) + 1;
+      b.updatedAt = Date.now();
+      await saveBoard(b);
+      await publish(b);
+      return res.status(200).json({ ok: true, pv, rev: b.rev });
     }
 
     // ---- da qui in poi serve essere il master in carica ----
