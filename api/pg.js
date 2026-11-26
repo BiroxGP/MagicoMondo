@@ -2,9 +2,11 @@
 //  - ogni PG ha la sua password (scelta quando lo si rende ufficiale)
 //  - la password master (variabile d'ambiente GM_PASSWORD) può modificare/eliminare qualsiasi PG
 //  - un giocatore (campo "player") può avere un solo PG ufficiale
+//  - con la propria password un PG può mandare ad altri PG effetti temporanei (bonus/malus): stanno in un
+//    archivio a parte, non modificano le schede, e chi li riceve può toglierli
 import crypto from 'node:crypto';
 import { promisify } from 'node:util';
-import { getAll, get, put, del, storeKind } from './_store.js';
+import { getAll, get, put, del, hGetAll, hSet, hDel, storeKind } from './_store.js';
 
 const scrypt = promisify(crypto.scrypt);
 const MAX_BYTES = 900_000;
@@ -84,6 +86,38 @@ function playerTaken(all, player, exceptId) {
   return null;
 }
 
+// ---- effetti temporanei ricevuti da altri PG ----
+// Un campo per effetto (mittente~id): due invii contemporanei non si sovrascrivono.
+const fxKey = (id) => 'mm:pgfx:' + id;
+const FXID_RE = /^[A-Za-z0-9_-]{1,40}$/;
+const MAX_FX = 40;
+const cut = (s, n) => String(s || '').trim().slice(0, n);
+
+function cleanEffect(e) {
+  if (!e || !FXID_RE.test(String(e.id || ''))) return null;
+  const mods = (Array.isArray(e.mods) ? e.mods : [])
+    .slice(0, 30)
+    .map((m) => ({ k: cut(m && m.k, 90), v: Math.round(Number(m && m.v) * 100) / 100 }))
+    .filter((m) => m.k && Number.isFinite(m.v) && m.v !== 0 && Math.abs(m.v) <= 999);
+  if (!mods.length) return null;
+  return { id: String(e.id), name: cut(e.name, 60) || 'Effetto', dur: cut(e.dur, 60), mods };
+}
+
+async function readFx(id) {
+  const list = [];
+  for (const [key, value] of Object.entries(await hGetAll(fxKey(id)))) {
+    try {
+      list.push({ ...JSON.parse(value), key });
+    } catch {
+      /* voce illeggibile: ignorata */
+    }
+  }
+  return list.sort((a, b) => (a.at || 0) - (b.at || 0));
+}
+
+const idList = (value, self) =>
+  [...new Set(Array.isArray(value) ? value.map(String) : [])].filter((x) => x !== self && ID_RE.test(x)).slice(0, MAX_FX);
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || 'unknown';
@@ -119,6 +153,10 @@ export default async function handler(req, res) {
   try {
     // ---- lettura (libera) ----
     if (method === 'GET') {
+      if (query.fx) {
+        if (!ID_RE.test(query.fx)) return res.status(404).json({ error: 'not_found' });
+        return res.status(200).json({ fx: await readFx(query.fx) });
+      }
       if (query.id) {
         if (!ID_RE.test(query.id)) return res.status(404).json({ error: 'not_found' });
         const rec = await get(query.id);
@@ -204,7 +242,45 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
+    // manda (o ritira) un proprio effetto ad altri PG: qui "id" è il PG che lo lancia
+    if (method === 'POST' && action === 'fxSend') {
+      const fxId = String((body.effect && body.effect.id) || '');
+      if (!FXID_RE.test(fxId)) return res.status(400).json({ error: 'bad_request' });
+      const targets = idList(body.targets, String(id));
+      const remove = idList(body.remove, String(id)).filter((x) => !targets.includes(x));
+      const effect = targets.length ? cleanEffect(body.effect) : null;
+      if (targets.length && !effect) return res.status(400).json({ error: 'bad_request' });
+      const field = String(id) + '~' + fxId;
+      const from = { id: String(id), name: cut(rec.character && rec.character.name, 60) };
+      const sent = [];
+      const missing = [];
+      const full = [];
+      for (const target of targets) {
+        if (!(await get(target))) {
+          missing.push(target);
+          continue;
+        }
+        const inbox = await hGetAll(fxKey(target));
+        if (!inbox[field] && Object.keys(inbox).length >= MAX_FX) {
+          full.push(target);
+          continue;
+        }
+        await hSet(fxKey(target), field, JSON.stringify({ ...effect, from, at: Date.now() }));
+        sent.push(target);
+      }
+      for (const target of remove) await hDel(fxKey(target), field);
+      return res.status(200).json({ ok: true, sent, missing, full });
+    }
+
+    // toglie effetti ricevuti: qui "id" è il PG che li ha addosso
+    if (method === 'POST' && action === 'fxDrop') {
+      const keys = (Array.isArray(body.keys) ? body.keys : []).slice(0, MAX_FX * 2);
+      for (const key of keys) await hDel(fxKey(String(id)), String(key).slice(0, 120));
+      return res.status(200).json({ ok: true });
+    }
+
     if (method === 'POST' && action === 'delete') {
+      for (const key of Object.keys(await hGetAll(fxKey(String(id))))) await hDel(fxKey(String(id)), key);
       await del(String(id));
       return res.status(200).json({ ok: true });
     }
