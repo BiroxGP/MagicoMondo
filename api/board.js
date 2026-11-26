@@ -23,11 +23,13 @@ const roomKeys = (prefix) => ({
   REV: prefix + 'board_rev',
   LIVE: prefix + 'board_live',
   LOCK: prefix + 'board_lock',
+  NPC: prefix + 'board_npcs',
 });
 const ROOMS = { official: roomKeys('mm:'), prova: roomKeys('mm:prova_') };
 const roomCtx = new AsyncLocalStorage();
 const K = () => roomCtx.getStore() || ROOMS.official;
 const MAX_BOARDS = 20;
+const MAX_NPCS = 60;
 const MAX_IMG_CHARS = 3_400_000;
 const MAX_STATE_CHARS = 600_000;
 const JPEG_PREFIX = 'data:image/jpeg;base64,';
@@ -88,6 +90,7 @@ function cleanTokens(list) {
       y: num(tk.y, -5000, 20000, 0),
     };
     if (tk.pgId) out.pgId = text(tk.pgId, 60);
+    if (typeof tk.npcId === 'string' && /^npc_[a-f0-9]{6,20}$/.test(tk.npcId)) out.npcId = tk.npcId;
     if (tk.hid === true) out.hid = true;
     if (typeof tk.cls === 'string' && tk.cls.trim()) out.cls = text(tk.cls.trim(), 40);
     if (tk.mov !== undefined && tk.mov !== null && tk.mov !== '' && Number.isFinite(Number(tk.mov))) out.mov = Math.round(num(tk.mov, 0, 999, 0) * 10) / 10;
@@ -150,6 +153,29 @@ async function pgPasswordOk(rec, password) {
   const key = await scrypt(pw, rec.salt, 32);
   const stored = Buffer.from(rec.hash, 'hex');
   return stored.length === key.length && crypto.timingSafeEqual(stored, key);
+}
+
+// NPC fissi: pedine salvate dal master, richiamabili su ogni lavagna (solo aspetto, classe e movimento).
+function cleanNpc(src, id) {
+  const t = cleanTokens([{ ...(src && typeof src === 'object' ? src : {}), id: 'x' }])[0];
+  const out = { id, name: t.name.trim(), color: t.color, size: t.size, shape: t.shape };
+  if (t.img) out.img = t.img;
+  if (t.cls) out.cls = t.cls;
+  if (t.mov !== undefined) out.mov = t.mov;
+  return out;
+}
+
+async function listNpcs() {
+  return Object.values(await hGetAll(K().NPC))
+    .map((r) => {
+      try {
+        return JSON.parse(r);
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean)
+    .sort((a, b) => String(a.name).localeCompare(String(b.name), 'it'));
 }
 
 function cleanTurn(t) {
@@ -311,7 +337,7 @@ function playerOf(rec) {
   const gs = (rec.grid && rec.grid.size) || DEFAULT_GRID.size;
   pub.tokens = (rec.tokens || []).filter((t) => {
     if (t.hid) return false;
-    if (!pub.fog.on || t.pgId) return true;
+    if (!pub.fog.on || t.pgId || t.npcId) return true;
     const half = (gs * t.size) / 2;
     return fogRevealed(pub.fog.strokes, t.x + half, t.y + half);
   });
@@ -603,7 +629,27 @@ async function main(req, res) {
         })
         .filter(Boolean)
         .sort((x, y) => x.updatedAt - y.updatedAt);
-      return res.status(200).json({ boards, activeId });
+      return res.status(200).json({ boards, activeId, npcs: await listNpcs() });
+    }
+
+    if (action === 'npcSave') {
+      const src = body.npc && typeof body.npc === 'object' ? body.npc : {};
+      const all = await hGetAll(K().NPC);
+      let id = String(src.id || '');
+      if (!Object.prototype.hasOwnProperty.call(all, id)) {
+        if (Object.keys(all).length >= MAX_NPCS) return res.status(400).json({ error: 'too_many_npc' });
+        id = 'npc_' + crypto.randomBytes(5).toString('hex');
+      }
+      const npc = cleanNpc(src, id);
+      if (!npc.name) return res.status(400).json({ error: 'bad_request' });
+      await hSet(K().NPC, id, JSON.stringify(npc));
+      return res.status(200).json({ ok: true, npc, npcs: await listNpcs() });
+    }
+
+    if (action === 'npcDelete') {
+      const id = String(body.npcId || '');
+      if (/^npc_[a-f0-9]{6,20}$/.test(id)) await hDel(K().NPC, id);
+      return res.status(200).json({ ok: true, npcs: await listNpcs() });
     }
 
     if (action === 'create') {
