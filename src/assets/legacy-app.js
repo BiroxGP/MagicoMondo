@@ -768,7 +768,8 @@ mine=items.filter(it=>it.locs.some(l=>locs.indexOf(l)>=0)),
 st=S({key:"vp:"+g,add:"vp:"+g,label:g,base:per.length?per[0].base:0,keys:["vp","vp:"+g]}),
 fxv=mmR2(st.total-st.base),same=per.every(p=>p.base===per[0].base),
 txt=add=>same?mmFmt(per[0].base+add):per.map(p=>p.loc.split(" ").pop()+" "+mmFmt(p.base+add)).join(" · ");
-return{...st,show:txt(fxv),baseShow:txt(0),small:!same,detail:mine.map(it=>[it.name+" ("+it.locs.filter(l=>locs.indexOf(l)>=0).map(l=>l.slice(l.indexOf(" ")+1)).join(", ")+")","VP "+mmFmt(it.vp)])}}),
+const nums=Op.filter(x=>re.test(x.location)).flatMap(x=>x.hitNumber.split("-").map(Number)),lo=Math.min(...nums),hi=Math.max(...nums);
+return{...st,sub:"3d6: "+(lo===hi?lo:lo+"-"+hi),show:txt(fxv),baseShow:txt(0),small:!same,detail:mine.map(it=>[it.name+" ("+it.locs.filter(l=>locs.indexOf(l)>=0).map(l=>l.slice(l.indexOf(" ")+1)).join(", ")+")","VP "+mmFmt(it.vp)])}}),
 headItems=items.filter(it=>it.locs.some(l=>/Testa/.test(l))),
 hasElmi=(o.talents||[]).some(c=>/comp_elmi|competenza elmi/i.test((c.id||"")+" "+(c.name||""))),
 headPct=S({key:"headPct",add:"headPct",label:"% testa",base:mmR2(headItems.reduce((a,it)=>a+(Number(it.pct)||0),0)+(hasElmi&&headItems.length?3:0)),keys:["headPct"],min:0,max:100}),
@@ -874,7 +875,7 @@ card("Tiri salvezza",i.jsx("div",{className:"mms-g",children:ts.map(s=>tile(s,{d
 card("Difesa",i.jsxs(i.Fragment,{children:[
 ing.lvl>0&&i.jsxs("div",{className:"mms-warn",children:[i.jsx("strong",{children:"Ingombro "+mmFmt(ing.tot)+": superata la soglia "+ing.lvl+" ("+mmFmt(ing.soglie[ing.lvl-1])+(ing.extra?", con Competenza armature":"")+")"}),i.jsx("div",{children:mmDelta(ing.cv)+" OCV e DCV · "+mmDelta(ing.other)+" movimento, atletica, correre, nuotare, cadere, roll incantesimi (già contati qui)"})]}),
 i.jsxs("div",{className:"mms-g",children:[tile(vdd),(headItems.length>0||headPct.parts.length>0)&&tile(headPct,{dice:headPct.total>0?()=>setRoll({t:"head",pct:headPct.total,fx:mmR2(headPct.total-headPct.base)}):void 0})]}),
-i.jsx("div",{className:"mms-note",style:{margin:"8px 0 4px",fontWeight:800},children:"VP per zona"}),
+i.jsxs("div",{style:{display:"flex",flexWrap:"wrap",alignItems:"center",justifyContent:"space-between",gap:"6px",margin:"10px 0 6px"},children:[i.jsx("span",{className:"mms-note",style:{fontWeight:800},children:"VP per zona"}),i.jsx("button",{className:"mms-b on",onClick:()=>setRoll({t:"hit"}),title:"Tira 3d6 per sapere dove arriva il colpo",children:"🎲 Dove colpisce (3d6)"})]}),
 i.jsx("div",{className:"mms-g",children:zones.map(s=>tile(s))})]})),
 card("Combattimento",i.jsxs("div",{style:{display:"flex",flexDirection:"column",gap:"6px"},children:[
 styles.length>1&&i.jsx("div",{style:{display:"flex",flexWrap:"wrap",gap:"6px"},children:styles.map(s=>i.jsx("button",{"data-nav":"1",className:"mms-b"+(s.id===selId?" on":""),onClick:()=>setSty(s.id),children:(s.name||"Stile senza nome")+(s.id===o.activeStyleId?" ●":"")},s.id))}),
@@ -907,12 +908,41 @@ roll&&roll.t==="gen"&&i.jsx(MmRollModal,{character:o,cfg:roll.cfg,onClose:close}
 roll&&roll.t==="ini"&&i.jsx(MmIniModal,{character:o,cfg:roll.cfg,onClose:close}),
 roll&&roll.t==="skill"&&i.jsx(SkillRollModal,{character:o,skill:roll.skill,onClose:close}),
 roll&&roll.t==="head"&&i.jsx(MmHeadRollModal,{character:o,pct:roll.pct,fx:roll.fx,onClose:close}),
+roll&&roll.t==="hit"&&i.jsx(MmHitModal,{character:o,headPct:headPct.total,headFx:mmR2(headPct.total-headPct.base),zoneOf:loc=>{const l=items.filter(it=>it.locs.indexOf(loc)>=0),g=MM_PGROUPS.find(x=>x[1].test(loc)),fx=mmFxSum(list,["vp",...(g?["vp:"+g[0]]:[])]);return{vp:mmR2(l.reduce((a,it)=>a+(Number(it.vp)||0),0)+fx),items:l,fx}},onClose:close}),
 roll&&roll.t==="pct"&&i.jsx(MmPctRollModal,{character:o,ab:roll.ab,free:(o.pctFree||{})[roll.ab.key]||0,onFree:n=>d({...o,pctFree:{...(o.pctFree||{}),[roll.ab.key]:n},updatedAt:Date.now()}),onClose:close}),
 roll&&roll.t==="sp"&&i.jsx(MmScacModal,{character:o,ab:roll.ab,onClose:close})
 ]})
 }
+// Dove va a finire il colpo: 3d6 sulla colonna HIT. Se la zona ha sinistra e destra, un d2 sceglie il lato (1 sinistra, 2 destra).
+function mmHitLocs(sum){return Op.filter(x=>x.hitNumber.split("-").map(Number).indexOf(sum)>=0).map(x=>x.location)}
+function MmHitModal({character:o,zoneOf,headPct,headFx,onClose}){
+const[res,setRes]=Se.useState(null),[st,setSt]=Se.useState(""),[head,setHead]=Se.useState(!1),
+doRoll=()=>{const dice=[mmRoll(6),mmRoll(6),mmRoll(6)],sum=dice[0]+dice[1]+dice[2],locs=mmHitLocs(sum),side=locs.length>1?mmRoll(2):0,loc=locs[side?side-1:0],name=loc.slice(loc.indexOf(" ")+1),zone=zoneOf(loc),isHead=/Testa/.test(loc),nm=o.name||"Personaggio",
+what=zone.items.map(x=>x.name+" "+mmFmt(x.vp)).concat(zone.fx?["effetti "+mmDelta(zone.fx)]:[]).join(", "),
+fields=[{name:"Dadi 3d6",value:dice.join(" + ")+" = "+sum,inline:true},{name:"Zona colpita",value:name,inline:true},{name:"VP nella zona",value:mmFmt(zone.vp)+(what?" ("+what+")":""),inline:true}];
+if(side)fields.push({name:"Lato (d2)",value:side+" = "+(side===1?"sinistra":"destra"),inline:true});
+if(isHead)fields.push({name:"Colpo alla testa",value:headPct>0?"Danni raddoppiati, salvo tiro "+headPct+"%":"Danni raddoppiati",inline:true});
+setRes({dice,sum,side,name,zone,what,isHead});setSt("Invio a Discord...");
+mmSendDiscord(mmHookFor(o.id),{username:nm,content:"**"+nm+"** viene colpito: 3d6 **"+dice.join(" + ")+" = "+sum+"** → **"+name+"** · VP **"+mmFmt(zone.vp)+"**",embeds:[{color:15105570,fields}]}).then(x=>setSt(x.ok?"Inviato su Discord ✓":x.reason))},
+btn="px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer border border-slate-300",
+go={width:"100%",padding:"9px",borderRadius:"8px",background:"#f59e0b",color:"#0f172a",fontWeight:800,fontSize:"14px",cursor:"pointer"};
+return i.jsxs(i.Fragment,{children:[i.jsx("div",{onClick:onClose,style:{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.6)",zIndex:60,display:"flex",alignItems:"center",justifyContent:"center",padding:"16px"},children:i.jsxs("div",{onClick:e=>e.stopPropagation(),style:{background:"#fff",color:"#0f172a",borderRadius:"12px",padding:"20px",width:"100%",maxWidth:"360px",maxHeight:"90vh",overflowY:"auto"},className:"space-y-3",children:[
+i.jsx("h4",{className:"text-sm font-bold text-slate-900",children:"Dove va a finire il colpo"}),
+i.jsx("p",{className:"text-xs text-slate-600",children:(o.name||"Personaggio")+": 3d6 sulla colonna HIT delle protezioni."}),
+i.jsx("button",{onClick:doRoll,style:go,children:res?"🎲 Tira un altro colpo":"🎲 Tira 3d6"}),
+res&&i.jsxs("div",{className:"text-center space-y-1",children:[
+i.jsx("div",{style:{fontSize:"40px",fontWeight:900,lineHeight:1},children:res.sum}),
+i.jsx("div",{style:{fontSize:"12px",color:"#64748b"},children:"3d6: "+res.dice.join(" + ")+(res.side?" · lato d2: "+res.side:"")}),
+i.jsx("div",{style:{fontSize:"22px",fontWeight:900},children:res.name}),
+i.jsx("div",{style:{fontSize:"15px",fontWeight:800},children:"VP nella zona: "+mmFmt(res.zone.vp)}),
+i.jsx("div",{style:{fontSize:"12px",color:"#64748b"},children:res.what||"Nessuna protezione"}),
+res.isHead&&i.jsxs("div",{style:{border:"2px solid #ef4444",background:"#fef2f2",color:"#7f1d1d",borderRadius:"8px",padding:"8px",fontSize:"12px",fontWeight:700},children:[headPct>0?"Testa: danni raddoppiati, a meno che il tiro sulla % testa riesca.":"Testa: danni raddoppiati (nessuna % testa).",headPct>0&&i.jsx("button",{onClick:()=>setHead(!0),style:{...go,marginTop:"6px",fontSize:"12px"},children:"🎲 Tira per annullare il raddoppio ("+headPct+"%)"})]}),
+i.jsx("div",{className:"text-[11px] text-slate-500",children:st})]}),
+i.jsx(MmHookField,{charId:o.id,charName:o.name}),i.jsx("button",{onClick:onClose,className:btn+" w-full",children:"Chiudi"})]})}),
+head&&i.jsx(MmHeadRollModal,{character:o,pct:headPct,fx:headFx,onClose:()=>setHead(!1)})]})
+}
 function MmProtPage({o,d,ingCat}){
-const items=mmProtItems(o),[dlg,setDlg]=Se.useState(null),[headRoll,setHeadRoll]=Se.useState(!1),[fix,setFix]=Se.useState({}),[help,setHelp]=Se.useState(!1),
+const items=mmProtItems(o),[hit,setHit]=Se.useState(!1),[dlg,setDlg]=Se.useState(null),[headRoll,setHeadRoll]=Se.useState(!1),[fix,setFix]=Se.useState({}),[help,setHelp]=Se.useState(!1),
 headLoc=(Op.find(x=>/Testa/.test(x.location))||{}).location,
 at=loc=>items.filter(it=>it.locs.indexOf(loc)>=0),
 save=list=>d({...o,protectionItems:list,ringMigrated:!0,bodyProtections:mmProtRows(o,list),updatedAt:Date.now()}),
@@ -937,7 +967,7 @@ btn="px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer border border-slate
 return i.jsxs("div",{className:"bg-white text-slate-950 border border-slate-300 rounded-xl shadow-xl p-6 space-y-3",children:[
 i.jsxs("div",{className:"flex items-center justify-between pb-2 border-b-2 border-slate-900",children:[i.jsx("h4",{className:"text-sm font-bold text-slate-900",children:"Protezioni Corporee, Armature & Ingombro"}),i.jsxs("div",{className:"text-right",children:[i.jsxs("div",{className:"text-[10px] font-bold uppercase text-slate-600",children:["Categoria Ingombro: ",ingCat.letter?"Cat. "+ingCat.letter:"Misto"]}),i.jsxs("div",{className:"text-[10px] font-mono text-slate-500",children:["Soglie 1/2/3: ",soglie.map(mmFmt).join("/"),ingCat.armor?" (con Competenza armature)":""]})]})]}),
 
-i.jsxs("div",{className:"flex flex-wrap items-center gap-2",children:[i.jsx("button",{onClick:()=>setDlg({name:"",vp:"",enc:"",pct:"",locs:[],tried:!1}),className:"px-3 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-extrabold cursor-pointer",children:"＋ Aggiungi protezione"}),i.jsx("button",{"data-nav":"1",onClick:()=>setHelp(v=>!v),className:btn,style:{width:"30px",padding:"6px 0",fontWeight:800,background:help?"#fde68a":void 0},title:"Come funziona",children:"?"}),i.jsx("span",{className:"text-[11px] text-slate-500",children:items.length+" oggetti · ingombro totale "+mmFmt(totalEnc)})]}),help&&i.jsx("p",{className:"text-[11px] text-slate-500",children:"Aggiungi un oggetto (es. spalline, elmo, corazza): scegli dove va, e il programma lo mette da solo nella griglia, con un colore, senza finire sopra gli altri. Un oggetto conta come UN solo ingombro anche se copre più zone. Un oggetto che copre tutto il corpo (usa «Tutto») va in automatico nel 5° slot. Nella griglia puoi cambiare al volo il VP (per i danni che scalano la protezione); toccando il nome di un oggetto si apre la finestra per modificarlo per intero (descrizione, ingombro, zone) o rimuoverlo. Sulla testa ogni oggetto può avere una percentuale (%): la somma è la probabilità di annullare il raddoppio dei danni alla testa; con il talento Competenza elmi si aggiunge in automatico +3% (se c'è almeno un oggetto sulla testa)."}),
+i.jsxs("div",{className:"flex flex-wrap items-center gap-2",children:[i.jsx("button",{onClick:()=>setDlg({name:"",vp:"",enc:"",pct:"",locs:[],tried:!1}),className:"px-3 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-extrabold cursor-pointer",children:"＋ Aggiungi protezione"}),i.jsx("button",{onClick:()=>setHit(!0),style:{padding:"8px 12px",borderRadius:"8px",background:"#0f172a",color:"#fcd34d",fontSize:"12px",fontWeight:800,cursor:"pointer"},title:"Tira 3d6 per sapere dove arriva il colpo (colonna HIT)",children:"🎲 Dove colpisce (3d6)"}),i.jsx("button",{"data-nav":"1",onClick:()=>setHelp(v=>!v),className:btn,style:{width:"30px",padding:"6px 0",fontWeight:800,background:help?"#fde68a":void 0},title:"Come funziona",children:"?"}),i.jsx("span",{className:"text-[11px] text-slate-500",children:items.length+" oggetti · ingombro totale "+mmFmt(totalEnc)})]}),help&&i.jsx("p",{className:"text-[11px] text-slate-500",children:"Aggiungi un oggetto (es. spalline, elmo, corazza): scegli dove va, e il programma lo mette da solo nella griglia, con un colore, senza finire sopra gli altri. Un oggetto conta come UN solo ingombro anche se copre più zone. Un oggetto che copre tutto il corpo (usa «Tutto») va in automatico nel 5° slot. Nella griglia puoi cambiare al volo il VP (per i danni che scalano la protezione); toccando il nome di un oggetto si apre la finestra per modificarlo per intero (descrizione, ingombro, zone) o rimuoverlo. Sulla testa ogni oggetto può avere una percentuale (%): la somma è la probabilità di annullare il raddoppio dei danni alla testa; con il talento Competenza elmi si aggiunge in automatico +3% (se c'è almeno un oggetto sulla testa)."}),
 bad.length>0&&i.jsx("div",{style:{background:"#fee2e2",border:"2px solid #dc2626",color:"#991b1b",borderRadius:"8px",padding:"6px 10px",fontSize:"12px",fontWeight:700},children:"⚠ "+bad.length+(bad.length===1?" oggetto ha":" oggetti hanno")+" l'ingombro scritto a testo invece che come numero (evidenziati in rosso). Correggi dalla lista sotto la griglia."}),
 i.jsx("div",{className:"overflow-x-auto",children:i.jsxs("table",{className:"w-full text-[10px] border-collapse border border-slate-900 text-center",children:[
 i.jsx("thead",{children:i.jsxs("tr",{className:"bg-slate-200 text-slate-950 font-bold border-b border-slate-900",children:[i.jsx("th",{className:"p-1 border-r border-slate-700 w-14",children:"Hit"}),i.jsx("th",{className:"p-1 border-r border-slate-700 w-16",children:"Zona"}),...[1,2,3,4,5].map(n=>i.jsx("th",{className:"p-1 border-r border-slate-300 w-28",children:"Oggetto "+n},n)),i.jsx("th",{className:"p-1 bg-slate-300 w-12",children:"VP Tot"})]})}),
@@ -962,7 +992,7 @@ i.jsxs("div",{className:"flex justify-end items-center gap-2 pt-2 border-t borde
 i.jsx("span",{className:"text-xs font-bold uppercase text-amber-800",children:"Annulla raddoppio danni testa:"}),i.jsx("span",{className:"text-sm font-mono font-black text-amber-800 mr-1",children:mmFmt(headPct)+"%"+(hasElmi&&headItems.length?" (incl. +3% Competenza elmi)":"")}),
 i.jsx("button",{onClick:()=>setHeadRoll(!0),disabled:!(headPct>0),className:"px-2 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-[11px] font-extrabold cursor-pointer disabled:opacity-40 mr-4",title:"Tira un d100: riesci se il tiro è pari o inferiore alla percentuale",children:"🎲 Rolla"}),
 i.jsx("span",{className:"text-xs font-bold uppercase text-slate-700",children:"Ingombro totale (ogni oggetto una volta):"}),i.jsx("span",{className:"text-sm font-mono font-black",style:{color:over>0?"#b91c1c":"#0f172a"},children:mmFmt(totalEnc)+(soglie.length?" · soglie superate: "+over+"/"+soglie.length:"")})]}),
-headRoll&&i.jsx(MmHeadRollModal,{character:o,pct:headPct,onClose:()=>setHeadRoll(!1)}),
+headRoll&&i.jsx(MmHeadRollModal,{character:o,pct:headPct,onClose:()=>setHeadRoll(!1)}),hit&&i.jsx(MmHitModal,{character:o,headPct,zoneOf:loc=>{const l=at(loc);return{vp:l.reduce((a,it)=>a+(Number(it.vp)||0),0),items:l,fx:0}},onClose:()=>setHit(!1)}),
 D&&i.jsx("div",{onClick:()=>setDlg(null),style:{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.6)",zIndex:60,display:"flex",alignItems:"center",justifyContent:"center",padding:"12px"},children:i.jsxs("div",{onClick:e=>e.stopPropagation(),style:{background:"#fff",color:"#0f172a",borderRadius:"12px",padding:"16px",width:"100%",maxWidth:"460px",maxHeight:"92vh",overflowY:"auto"},className:"space-y-3",children:[
 i.jsx("h4",{className:"text-sm font-bold text-slate-900",children:D.id?"Modifica protezione":"Aggiungi protezione"}),
 i.jsxs("label",{className:"block text-xs font-bold",children:["Descrizione",i.jsx("input",{type:"text",value:D.name,maxLength:60,placeholder:"es. Spalline di rame",onChange:e=>setDlg({...D,name:e.target.value}),style:{...inp,...errB(D.name.trim()==="")}})]}),
