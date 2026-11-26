@@ -248,6 +248,31 @@ function fogRevealed(strokes, x, y) {
   return false;
 }
 
+// Simboli e testi sulla mappa: t = 's' simbolo (k = nome del simbolo) oppure 'x' testo. x,y in pixel della mappa.
+function cleanMarks(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .slice(0, 400)
+    .map((m, n) => {
+      const o = m && typeof m === 'object' ? m : {};
+      const tt = o.t === 'x' ? 'x' : 's';
+      const out = {
+        id: text(o.id, 40) || 'm' + n,
+        t: tt,
+        x: num(o.x, -5000, 20000, 0),
+        y: num(o.y, -5000, 20000, 0),
+        s: Math.round(num(o.s, 0.25, 12, 1) * 100) / 100,
+        r: Math.round(num(o.r, 0, 359, 0)),
+        color: COLOR_RE.test(o.color || '') ? o.color : '#111827',
+      };
+      if (tt === 's') out.k = /^[a-z0-9_]{1,30}$/.test(String(o.k || '')) ? String(o.k) : 'porta';
+      if (typeof o.text === 'string' && o.text.trim()) out.text = text(o.text.trim(), tt === 'x' ? 200 : 60);
+      if (o.hid === true) out.hid = true;
+      return out;
+    })
+    .filter((m) => m.t === 's' || m.text);
+}
+
 const publicOf = (rec) => ({
   id: rec.id,
   name: rec.name,
@@ -260,6 +285,8 @@ const publicOf = (rec) => ({
   drawings: rec.drawings || [],
   turn: rec.turn || { order: [], active: '', round: 1 },
   fog: rec.fog || EMPTY_FOG,
+  marks: rec.marks || [],
+  symLabels: rec.symLabels !== false,
 });
 
 // Quello che vedono i giocatori: le pedine nascoste o coperte dalla nebbia NON vengono nemmeno inviate
@@ -272,6 +299,13 @@ function playerOf(rec) {
     if (!pub.fog.on || t.pgId) return true;
     const half = (gs * t.size) / 2;
     return fogRevealed(pub.fog.strokes, t.x + half, t.y + half);
+  });
+  // simboli e testi: via quelli nascosti dal master e quelli sotto la nebbia
+  pub.marks = (rec.marks || []).filter((m) => {
+    if (m.hid) return false;
+    if (!pub.fog.on) return true;
+    const half = m.t === 'x' ? 0 : (gs * m.s) / 2;
+    return fogRevealed(pub.fog.strokes, m.x + half, m.y + half);
   });
   return pub;
 }
@@ -533,6 +567,8 @@ export default async function handler(req, res) {
         drawings: [],
         turn: { order: [], active: '', round: 1 },
         fog: { on: false, strokes: [] },
+        marks: [],
+        symLabels: true,
       };
       await saveBoard(rec);
       if (!(await kGet(PUBLIC))) await publish(rec);
@@ -556,6 +592,8 @@ export default async function handler(req, res) {
         drawings: cleanDrawings(st.drawings),
         turn: cleanTurn(st.turn),
         fog: st.fog === undefined ? rec.fog || { on: false, strokes: [] } : cleanFog(st.fog),
+        marks: st.marks === undefined ? rec.marks || [] : cleanMarks(st.marks),
+        symLabels: st.symLabels === undefined ? rec.symLabels !== false : st.symLabels !== false,
         rev: rec.rev + 1,
         updatedAt: Date.now(),
       };
