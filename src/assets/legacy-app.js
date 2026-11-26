@@ -843,7 +843,7 @@ function mmSpellHit(ls,sp,words){const t=mmSNorm(ls.name+" "+sp.name+" "+sp.desc
 function mmQueryWords(q){return mmSNorm(q).split(/\s+/).filter(Boolean)}
 function mmSortLists(lists,ids){const known=ids||[],cnt=l=>l.spells.filter(sp=>known.includes(sp.id)).length;return[...lists].sort((a,b)=>(cnt(b)>0?1:0)-(cnt(a)>0?1:0))}
 // Tabella di avanzamento (manuale, pag. 13): PX richiesti, punti personaggio, punti avanzamento "subito/da tenere" per categoria A-D,
-// bint = si somma il bonus INT a entrambi i valori, e le voci speciali del livello.
+// bint = si somma una volta il bonus INT al totale del livello (come in Crea PG), e le voci speciali del livello.
 const MM_LVL={
 2:{px:40,pp:1,A:[3,3],B:[2,3],C:[2,2],D:[1,2],bint:1,conn:1,sk0:1},
 3:{px:90,pp:2,A:[3,4],B:[3,2],C:[2,2],D:[2,1],cls:1},
@@ -872,7 +872,7 @@ openDlg({which,L})
 function MmLevelModal({o,which,L,onClose,onApply}){
 const[conn,setConn]=Se.useState(""),[sk0,setSk0]=Se.useState(""),[pro,setPro]=Se.useState(""),[proNew,setProNew]=Se.useState(""),
 T=MM_LVL[L],cls=mmClsOf(o,which)||{},cat=String(cls.advancementCategory||"C").toUpperCase().charAt(0),pair=T[cat]||T.C,
-bint=T.bint?Math.max(0,$e(o.attributes.INT,(o.attributeBonusOverrides||{}).INT)):0,now=pair[0]+bint,keep=pair[1]+bint,
+bint=T.bint?Math.max(0,$e(o.attributes.INT,(o.attributeBonusOverrides||{}).INT)):0,now=pair[0],keep=pair[1],total=now+keep+bint,
 magic=cls.spellAccess?Math.max(0,Ap(cls,L,o.attributes)-Ap(cls,L-1,o.attributes)):0,
 after=mmLvlBase(o,which,L),cap=Ub(after.level,o.archetypeRace),skills=o.skills||[],
 findSk=n=>{const x=skills.findIndex(s=>s.name===n);if(x>=0)return x;const m=skills.map((s,k)=>Sn(n,s.name)?k:-1).filter(k=>k>=0);return m.length===1?m[0]:-1},
@@ -891,7 +891,7 @@ if(conn){const k=findSk(conn),v=valOf(conn);if(k>=0)sk[k]={...sk[k],value:v+1,..
 if(sk0)sk.push({name:sk0,value:0,baseClassValue:0,category:catOf(sk0)});
 const pk=[...pros];
 if(pro==="__new"&&proNew.trim())pk.push({name:proNew.trim(),grade:1});else if(pro!==""&&pro!=="__new"){const k=Number(pro);if(pk[k])pk[k]={...pk[k],grade:Math.min(3,(pk[k].grade||0)+1)}}
-onApply({...after,skills:sk,proskills:pk,characterPoints:r1((Number(o.characterPoints)||0)+T.pp),advancementPoints:r1((Number(o.advancementPoints)||0)+now+keep),advancementPointsMagic:r1((Number(o.advancementPointsMagic)||0)+magic),lvlGranted:L,updatedAt:Date.now()})
+onApply({...after,skills:sk,proskills:pk,characterPoints:r1((Number(o.characterPoints)||0)+T.pp),advancementPoints:r1((Number(o.advancementPoints)||0)+total),advancementPointsMagic:r1((Number(o.advancementPointsMagic)||0)+magic),lvlGranted:L,updatedAt:Date.now()})
 },
 sel="w-full bg-white border border-slate-400 rounded-lg px-2 py-1.5 text-xs",
 row=(label,val,note)=>i.jsxs("div",{className:"flex items-start justify-between gap-3 border-b border-slate-200 py-1",children:[i.jsxs("div",{children:[i.jsx("div",{className:"text-xs font-bold",children:label}),note&&i.jsx("div",{className:"text-[10px] text-slate-500",children:note})]}),i.jsx("div",{className:"text-sm font-mono font-black",children:val})]}),
@@ -901,7 +901,7 @@ auto=[T.cls&&"capacità di classe",T.race&&"capacità di razza"].filter(Boolean)
 return i.jsx("div",{style:{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.65)",zIndex:60,display:"flex",alignItems:"center",justifyContent:"center",padding:"12px"},children:i.jsxs("div",{style:{background:"#fff",color:"#0f172a",borderRadius:"12px",padding:"18px",width:"100%",maxWidth:"440px",maxHeight:"92vh",overflowY:"auto"},className:"space-y-3",children:[
 i.jsx("h4",{className:"text-sm font-bold text-slate-900",children:"⬆ "+(cls.name||"Classe")+": livello "+(L-1)+" → "+L}),
 xp<T.px&&i.jsx("div",{style:{background:"#fef3c7",border:"1px solid #d97706",borderRadius:"8px",padding:"6px 8px",fontSize:"11px"},children:"Attenzione: per il livello "+L+" servono "+T.px+" PX, in scheda ce ne sono "+xp+"."}),
-i.jsxs("div",{children:[row("Punti Personaggio","+"+T.pp),row("Punti Avanzamento","+"+(now+keep),"Categoria "+cat+": "+now+" spendibili subito (skill, proskill, lettere, lingue, talent a costo +1) e "+keep+" da tenere"+(bint?" — bonus INT +"+bint+" già incluso in entrambi":"")+". Vanno tutti nei Punti Avanzamento della scheda: quelli non spesi restano lì."),cls.spellAccess&&row("Punti Avanzamento Magici","+"+magic)]}),
+i.jsxs("div",{children:[row("Punti Personaggio","+"+T.pp),row("Punti Avanzamento","+"+total,"Categoria "+cat+": "+now+" spendibili subito (skill, proskill, lettere, lingue, talent a costo +1) e "+keep+" da tenere"+(bint?", più il bonus INT +"+bint:"")+". Vanno tutti nei Punti Avanzamento della scheda: quelli non spesi restano lì."),cls.spellAccess&&row("Punti Avanzamento Magici","+"+magic)]}),
 T.conn&&block("Connessa: +1 a una skill della classe (tetto "+cap+")",i.jsxs("select",{value:conn,onChange:e=>setConn(e.target.value),className:sel,children:[i.jsx("option",{value:"",children:connList.length?"— scegli —":"nessuna skill sotto il tetto"}),...connList.map(n=>i.jsx("option",{value:n,children:n+"  ("+valOf(n)+" → "+(valOf(n)+1)+")"},n))]})),
 T.sk0&&block("Skill a 0: aggiungi una skill che non hai",i.jsxs("select",{value:sk0,onChange:e=>setSk0(e.target.value),className:sel,children:[i.jsx("option",{value:"",children:"— scegli —"}),...sk0List.map(n=>i.jsx("option",{value:n,children:n},n))]})),
 T.pro&&block("Proskill: una nuova al grado 1, oppure +1 grado",i.jsxs("div",{className:"space-y-1",children:[i.jsxs("select",{value:pro,onChange:e=>setPro(e.target.value),className:sel,children:[i.jsx("option",{value:"",children:"— scegli —"}),i.jsx("option",{value:"__new",children:"✎ Nuova proskill (grado 1)…"}),...pros.map((p,k)=>(p.grade||0)<3&&i.jsx("option",{value:String(k),children:p.name+"  (grado "+(p.grade||0)+" → "+((p.grade||0)+1)+")"},k))]}),pro==="__new"&&i.jsx("input",{type:"text",maxLength:60,value:proNew,onChange:e=>setProNew(e.target.value),placeholder:"Nome della proskill",className:sel})]})),
