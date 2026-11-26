@@ -541,8 +541,8 @@ loose=rows.filter(w=>!isSpec(w)&&!styles.some(s=>s.id===w.styleId)),
 specials=rows.filter(isSpec),
 styleIni=s=>Math.round((iniTot+mmN(s.ibv))*10)/10,
 handsOf=list=>list.reduce((a,w)=>a+(kindOf(w)==="2m"?2:1),0),
-calc=w=>{const k=kindOf(w),lot=w.builtin==="lottare",sk=w.skill?mmSkillVal(o,w.skill):null,half=sk===null?null:Math.floor((dex+sk+mmN(w.bil))/2),base=lot?m.unarmedDamage:w.damage,bonus=lot?0:m.strDmgBonus*(k==="2m"?2:1);
-return{k,lot,sk,ocv:half===null?null:half+mmN(w.ocvBonus),dcv:half===null?null:half+mmN(w.dfb)+mmN(w.dcvBonus),ini:Math.round((iniTot+mmN(w.ibv))*10)/10,cri:lot?m.critici:w.cri,base,bonus,tot:lot?String(base):mmAddDmg(base,bonus)}},
+calc=w=>{const k=kindOf(w),lot=w.builtin==="lottare",sk=w.skill?mmSkillVal(o,w.skill):null,pen=w.skill&&!mmSkillOwned(o,w.skill)?-2:0,half=sk===null?null:Math.floor((dex+sk+pen+mmN(w.bil))/2),base=lot?m.unarmedDamage:w.damage,bonus=lot?0:m.strDmgBonus*(k==="2m"?2:1);
+return{k,lot,sk,pen,ocv:half===null?null:half+mmN(w.ocvBonus),dcv:half===null?null:half+mmN(w.dfb)+mmN(w.dcvBonus),ini:Math.round((iniTot+mmN(w.ibv))*10)/10,cri:lot?m.critici:w.cri,base,bonus,tot:lot?String(base):mmAddDmg(base,bonus)}},
 inp="w-full border border-slate-300 rounded px-1 py-0.5 text-xs text-center text-slate-900 bg-white focus:outline-none focus:border-amber-500",
 lbl="block text-[9px] uppercase tracking-wider text-slate-500 text-center",
 box="border border-slate-300 rounded p-2 text-center",
@@ -552,7 +552,7 @@ field=(w,key,label,ro)=>i.jsxs("div",{children:[i.jsx("label",{className:lbl,chi
 rowCard=w=>{const c=calc(w),spec=c.k==="speciale";
 return i.jsxs("div",{className:"border border-slate-300 rounded-xl p-2 space-y-2 bg-white",children:[
 i.jsxs("div",{className:"flex flex-wrap items-center gap-2",children:[
-i.jsx("span",{className:"px-2 py-1 rounded bg-slate-900 text-amber-300 text-[11px] font-extrabold uppercase tracking-wide",title:"Skill su cui è calcolato il rigo",children:w.skill?w.skill+" "+c.sk:"scegli la skill"}),
+i.jsx("span",{className:"px-2 py-1 rounded bg-slate-900 text-amber-300 text-[11px] font-extrabold uppercase tracking-wide",title:"Skill su cui è calcolato il rigo",children:w.skill?w.skill+" "+c.sk+(c.pen?" · non posseduta −2":""):"scegli la skill"}),
 i.jsx("input",{type:"text",value:w.name||"",placeholder:"Nome arma / mossa",onChange:e=>upd(w.id,{name:e.target.value}),className:"flex-1 min-w-[140px] border-b border-dashed border-slate-400 bg-transparent text-sm font-bold text-slate-900 focus:outline-none focus:border-amber-500"}),
 i.jsxs("select",{value:w.skill||"",onChange:e=>upd(w.id,{skill:e.target.value}),className:"border border-slate-300 rounded px-1 py-0.5 text-xs bg-white text-slate-900",title:"Skill del rigo",children:[i.jsx("option",{value:"",children:"— skill —"}),cs.map(n=>i.jsx("option",{value:n,children:n},n))]}),
 i.jsx("select",{value:c.k,onChange:e=>upd(w.id,{kind:e.target.value,...(e.target.value==="speciale"?{styleId:void 0}:{})}),className:"border border-slate-300 rounded px-1 py-0.5 text-xs bg-white text-slate-900",children:MM_KINDS.map(([v,n])=>i.jsx("option",{value:v,children:n},v))}),
@@ -796,10 +796,10 @@ iniStat=(key,label,ibv)=>S({key,add:"ini",label,base:mmR2(iniOf(m0)+mmN(ibv)),ef
 mainIni=iniStat("ini","Iniziativa",selStyle?selStyle.ibv:0),
 critG=der("critici","Critici"),
 combat=w=>{const k=w.kind||"1m",lot=w.builtin==="lottare",
-sk=w.skill?mmSkillVal(o,w.skill):null,skFx=w.skill?mmFxSum(list,["sk:"+w.skill,"skAll"]):0,
+sk=w.skill?mmSkillVal(o,w.skill):null,skFx=w.skill?mmFxSum(list,["sk:"+w.skill,"skAll"]):0,pen=w.skill&&!mmSkillOwned(o,w.skill)?-2:0,
 cv=(key,label,extra)=>{if(sk===null)return{key:w.id+key,add:key,label,base:0,total:0,show:"—",baseShow:"—",parts:[],via:0,ing:0};
-const h0=Math.floor((dexOf(o)+sk+mmN(w.bil))/2),h=Math.floor((dexOf(eo)+sk+skFx+mmN(w.bil))/2);
-return S({key:w.id+key,add:key,label,base:h0+extra,eff:h+extra,keys:[key],ing:ing.cv,viaText:"Da destrezza / skill modificate"})},
+const h0=Math.floor((dexOf(o)+sk+pen+mmN(w.bil))/2),h=Math.floor((dexOf(eo)+sk+skFx+pen+mmN(w.bil))/2);
+return S({key:w.id+key,add:key,label,base:h0+extra,eff:h+extra,keys:[key],ing:ing.cv,viaText:"Da destrezza / skill modificate",detail:pen?[["Skill non posseduta","−2 alla skill, già contato"]]:void 0})},
 fxd=mmFxSum(list,["dmg"]),bon0=lot?0:m0.strDmgBonus*(k==="2m"?2:1),bon=lot?0:m.strDmgBonus*(k==="2m"?2:1),
 una=String(m.unarmedDamage),
 dmgBase=lot?String(m0.unarmedDamage):mmAddDmg(w.damage,bon0),
@@ -810,7 +810,7 @@ dmg={key:w.id+"dmg",add:"dmg",label:"Danni",base:0,total:dmgSum,show:dmgShow,bas
 cRaw=lot?String(m0.critici):String(w.cri==null?"":w.cri).trim(),cNum=/^-?\d+$/.test(cRaw),cParts=cRaw?mmFxParts(list,["critici"]):[],cFx=cRaw?mmFxSum(list,["critici"]):0,
 cri=cNum?S({key:w.id+"cri",add:"critici",label:"CRI",base:parseInt(cRaw,10),eff:parseInt(cRaw,10)+(lot?m.critici-m0.critici:0),keys:["critici"]}):{key:w.id+"cri",add:"critici",label:"CRI",base:0,total:cFx,show:(cRaw||"—")+(cFx?" "+mmDelta(cFx):""),baseShow:cRaw||"—",parts:cParts,via:0,ing:0},
 ownIni=isSpec(w)||(!(selStyle&&w.styleId===selStyle.id)&&mmN(w.ibv)!==0)?iniStat(w.id+"ini","INI",w.ibv):null;
-return{w,lot,sk:sk===null?null:sk+skFx,cells:[cv("ocv","OCV",mmN(w.ocvBonus)),cv("dcv","DCV",mmN(w.dfb)+mmN(w.dcvBonus)),dmg,cri],ownIni}},
+return{w,lot,pen,sk:sk===null?null:sk+skFx,cells:[cv("ocv","OCV",mmN(w.ocvBonus)),cv("dcv","DCV",mmN(w.dfb)+mmN(w.dcvBonus)),dmg,cri],ownIni}},
 cRows=shownRows.map(combat),
 // ---- Movimento ----
 moves=[der("mov","Movimento",{ing:ing.other,min:0}),der("salto","Salto",{min:0}),S({key:"solleva",add:"solleva",label:"Sollevare",base:m0.solleva||0,eff:m.solleva||0,keys:["solleva"],min:0}),S({key:"sposta",add:"sposta",label:"Spostare",base:m0.sposta||0,eff:m.sposta||0,keys:["sposta"],min:0})],
@@ -904,7 +904,7 @@ card("Combattimento",i.jsxs("div",{style:{display:"flex",flexDirection:"column",
 styles.length>1&&i.jsx("div",{style:{display:"flex",flexWrap:"wrap",gap:"6px"},children:styles.map(s=>i.jsx("button",{"data-nav":"1",className:"mms-b"+(s.id===selId?" on":""),onClick:()=>setSty(s.id),children:(s.name||"Stile senza nome")+(s.id===o.activeStyleId?" ●":"")},s.id))}),
 i.jsxs("div",{className:"mms-g",children:[tile(mainIni,{label:"Iniziativa"+(selStyle&&selStyle.name?" · "+selStyle.name:""),dice:()=>setRoll({t:"ini",cfg:{ini:!0,label:(selStyle&&selStyle.name)||"",title:"Iniziativa",base:mainIni.base,fx:mmR2(mainIni.total-mainIni.base),fxLabel:mmFxWhy(mainIni)}})}),tile(critG)]}),
 cRows.map(r=>i.jsxs("div",{className:"mms-row",children:[
-i.jsxs("div",{style:{fontSize:"12px"},children:[i.jsx("strong",{children:r.w.name||r.w.skill||"Senza nome"}),r.w.skill&&i.jsx("span",{className:"mms-note",children:" · "+r.w.skill+" "+r.sk})]}),
+i.jsxs("div",{style:{fontSize:"12px"},children:[i.jsx("strong",{children:r.w.name||r.w.skill||"Senza nome"}),r.w.skill&&i.jsx("span",{className:"mms-note",children:" · "+r.w.skill+" "+r.sk+(r.pen?" · non posseduta −2":"")})]}),
 i.jsxs("div",{className:"mms-g five",children:[r.cells.map(s=>tile(s)),r.ownIni&&tile(r.ownIni,{dice:()=>setRoll({t:"ini",cfg:{ini:!0,label:r.w.name||r.w.skill||"",title:"Iniziativa",base:r.ownIni.base,fx:mmR2(r.ownIni.total-r.ownIni.base),fxLabel:mmFxWhy(r.ownIni)}})})]})]},r.w.id))]})),
 card("Movimento",i.jsx("div",{className:"mms-g",children:moves.map(s=>tile(s))})),
 card("Magia",i.jsx("div",{className:"mms-g wide",children:[...magic.map(s=>tile(s,{dice:()=>setRoll({t:"gen",cfg:{title:s.label,baseLabel:"Roll",formula:s.label,base:s.base,fx:mmR2(s.total-s.base),fxLabel:mmFxWhy(s),canRaise:!0,noFree:!0,maxRaises:mmMaxRaises(o,s.key==="rollMagico"?"magico":"mistico"),free:0}})})),tile(cosmo,{dice:genRoll(cosmo)})]})),
