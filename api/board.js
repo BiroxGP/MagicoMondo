@@ -5,7 +5,10 @@
 //  - la mappa (immagine ridotta dal browser) è separata e si scarica una volta sola
 //  - un solo master alla volta: un nuovo accesso master prende il controllo e il vecchio passa in sola lettura
 import crypto from 'node:crypto';
-import { hGetAll, hGet, hSet, hDel, kGet, kGetMany, kSet, storeKind } from './_store.js';
+import { promisify } from 'node:util';
+import { hGetAll, hGet, hSet, hDel, kGet, kGetMany, kSet, storeKind, get as getPg } from './_store.js';
+
+const scrypt = promisify(crypto.scrypt);
 
 const BOARDS = 'mm:boards';
 const IMGS = 'mm:board_imgs';
@@ -16,7 +19,7 @@ const REV = 'mm:board_rev';
 const LIVE = 'mm:board_live';
 const LIVE_MS = 100_000;
 const LOCK = 'mm:board_lock';
-const MAX_BOARDS = 10;
+const MAX_BOARDS = 20;
 const MAX_IMG_CHARS = 3_400_000;
 const MAX_STATE_CHARS = 600_000;
 const JPEG_PREFIX = 'data:image/jpeg;base64,';
@@ -78,6 +81,13 @@ function cleanTokens(list) {
     };
     if (tk.pgId) out.pgId = text(tk.pgId, 60);
     if (tk.hid === true) out.hid = true;
+    if (typeof tk.cls === 'string' && tk.cls.trim()) out.cls = text(tk.cls.trim(), 40);
+    if (tk.mov !== undefined && tk.mov !== null && tk.mov !== '' && Number.isFinite(Number(tk.mov))) out.mov = Math.round(num(tk.mov, 0, 999, 0) * 10) / 10;
+    if (typeof tk.wl === 'string' && tk.wl.trim()) out.wl = text(tk.wl.trim(), 24);
+    const iniAt = Math.round(num(tk.iniAt, 0, 9e15, 0));
+    if (iniAt > 0) out.iniAt = iniAt;
+    const syncAt = Math.round(num(tk.syncAt, 0, 9e15, 0));
+    if (syncAt > 0) out.syncAt = syncAt;
     if (tk.ini !== undefined && tk.ini !== null && tk.ini !== '' && Number.isFinite(Number(tk.ini))) out.ini = Math.round(num(tk.ini, -999, 9999, 0));
     const wound = Math.round(num(tk.wound, 0, 3, 0));
     if (wound > 0) out.wound = wound;
@@ -90,6 +100,43 @@ function cleanTokens(list) {
 }
 
 // Turni di combattimento: l'ordine tra pedine con la stessa iniziativa, chi ha il turno e il round.
+// Se un giocatore ha mandato iniziativa o ferite dopo l'ultima lettura del master, il salvataggio del master non le cancella.
+function keepNewer(incoming, stored) {
+  const old = new Map((stored || []).map((x) => [x.id, x]));
+  return incoming.map((t) => {
+    const o = old.get(t.id);
+    if (!o || !t.pgId) return t;
+    const r = { ...t };
+    if ((o.iniAt || 0) > (t.iniAt || 0)) {
+      r.iniAt = o.iniAt;
+      if (o.ini !== undefined) r.ini = o.ini;
+    }
+    if ((o.syncAt || 0) > (t.syncAt || 0)) {
+      r.syncAt = o.syncAt;
+      for (const k of ['wound', 'wl', 'cls', 'mov']) {
+        if (o[k] !== undefined) r[k] = o[k];
+        else delete r[k];
+      }
+    }
+    return r;
+  });
+}
+
+async function pgPasswordOk(rec, password) {
+  const pw = String(password || '');
+  if (!pw || !rec) return false;
+  const master = process.env.GM_PASSWORD;
+  if (master) {
+    const a = crypto.createHash('sha256').update(pw).digest();
+    const b = crypto.createHash('sha256').update(master).digest();
+    if (crypto.timingSafeEqual(a, b)) return true;
+  }
+  if (!rec.salt || !rec.hash) return false;
+  const key = await scrypt(pw, rec.salt, 32);
+  const stored = Buffer.from(rec.hash, 'hex');
+  return stored.length === key.length && crypto.timingSafeEqual(stored, key);
+}
+
 function cleanTurn(t) {
   const src = t && typeof t === 'object' ? t : {};
   const order = [];
@@ -368,6 +415,66 @@ export default async function handler(req, res) {
       return res.status(200).json({ token });
     }
 
+    // ---- un giocatore manda iniziativa / ferite / classe / movimento della sua pedina (password del suo PG) ----
+    if (action === 'pgSync') {
+      const pgId = String(body.pgId || '');
+      if (!/^[A-Za-z0-9_-]{6,60}$/.test(pgId)) return res.status(400).json({ error: 'bad_request' });
+      if ((fails.get(ip) || []).filter((x) => Date.now() - x < 600_000).length >= 10) return res.status(429).json({ error: 'rate_limited' });
+      const pg = await getPg(pgId);
+      if (!pg || !(await pgPasswordOk(pg, body.password))) {
+        limited(fails, ip, 1000, 600_000);
+        return res.status(401).json({ error: 'bad_password' });
+      }
+      const upd = {};
+      if (body.ini !== undefined && Number.isFinite(Number(body.ini))) upd.ini = Math.round(num(body.ini, -999, 9999, 0));
+      if (body.wound !== undefined) upd.wound = Math.round(num(body.wound, 0, 3, 0));
+      if (typeof body.wl === 'string') upd.wl = text(body.wl.trim(), 24);
+      if (typeof body.cls === 'string') upd.cls = text(body.cls.trim(), 40);
+      if (body.mov !== undefined && Number.isFinite(Number(body.mov))) upd.mov = Math.round(num(body.mov, 0, 999, 0) * 10) / 10;
+      const now = Date.now();
+      let updated = 0;
+      for (const raw of Object.values(await hGetAll(BOARDS))) {
+        let b;
+        try {
+          b = JSON.parse(raw);
+        } catch {
+          continue;
+        }
+        if (!(b.tokens || []).some((x) => x.pgId === pgId)) continue;
+        b.tokens = b.tokens.map((x) => {
+          if (x.pgId !== pgId) return x;
+          const n = { ...x };
+          if (upd.ini !== undefined) {
+            n.ini = upd.ini;
+            n.iniAt = now;
+          }
+          if (upd.wound !== undefined || upd.wl !== undefined || upd.cls !== undefined || upd.mov !== undefined) {
+            if (upd.wound !== undefined) {
+              if (upd.wound > 0) n.wound = upd.wound;
+              else delete n.wound;
+            }
+            if (upd.wl !== undefined) {
+              if (upd.wl) n.wl = upd.wl;
+              else delete n.wl;
+            }
+            if (upd.cls !== undefined) {
+              if (upd.cls) n.cls = upd.cls;
+              else delete n.cls;
+            }
+            if (upd.mov !== undefined) n.mov = upd.mov;
+            n.syncAt = now;
+          }
+          return n;
+        });
+        b.rev = (b.rev || 1) + 1;
+        b.updatedAt = now;
+        await saveBoard(b);
+        await publishIfActive(b);
+        updated++;
+      }
+      return res.status(200).json({ ok: true, updated });
+    }
+
     // ---- da qui in poi serve essere il master in carica ----
     if (!(await isMaster(body.token))) return res.status(401).json({ error: 'not_master' });
 
@@ -444,7 +551,7 @@ export default async function handler(req, res) {
         ...rec,
         name: text(st.name, 60) || rec.name,
         grid: cleanGrid(st.grid),
-        tokens: cleanTokens(st.tokens),
+        tokens: keepNewer(cleanTokens(st.tokens), rec.tokens),
         effects: cleanEffects(st.effects),
         drawings: cleanDrawings(st.drawings),
         turn: cleanTurn(st.turn),
