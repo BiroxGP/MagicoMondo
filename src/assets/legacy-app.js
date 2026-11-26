@@ -527,8 +527,40 @@ if((o.skills||[]).some(x=>x.name===name))return!0;
 const n=name.toLowerCase();
 return[o.primaryClassId,o.secondaryClassId].some(id=>{const c=ge.find(z=>z.id===id);return Object.keys((c&&c.baseSkills)||{}).some(k=>Sn(k,name)||n.startsWith(k.toLowerCase()))})
 }
+// Tiro per colpire: d20. La DCV avversaria non si conosce, quindi si segnala solo il critico (d20 da 1 a CRI,
+// dove CRI = Critici del personaggio + critici in più dell'arma) e il fallimento critico (20).
+function mmCritExtra(cri){const m=String(cri==null?"":cri).trim().match(/^\+?\s*(\d+)$/);return m?parseInt(m[1],10):0}
+function mmCritBad(cri){const s=String(cri==null?"":cri).trim();return!!s&&!/^\+?\s*\d+$/.test(s)}
+function MmAttackModal({character:o,atk,onChange,onClose}){
+const[res,setRes]=Se.useState(null),[st,setSt]=Se.useState(""),[mod,setMod]=Se.useState(0),[mk,setMk]=Se.useState(""),
+wi=mmWoundInfo(o,!1),wound=wi.mod,ocv=atk.ocv+wound+mod,crit=Math.max(1,Math.min(19,atk.critC+atk.critW)),
+range=crit>1?"da 1 a "+crit:"con 1",
+doRoll=()=>{const r=mmRoll(20),kind=r<=crit?"crit":r===20?"fumble":"",nm=o.name||"Personaggio",short=kind==="crit"?"🌟 CRITICO":kind==="fumble"?"💀 FALLIMENTO CRITICO":"Da confrontare con la DCV avversaria",
+fields=[{name:"Arma / mossa",value:atk.name||"—",inline:true},{name:"OCV",value:String(atk.ocv)+(atk.ocv!==atk.ocvBase?" (scheda "+atk.ocvBase+")":""),inline:true}];
+if(wound)fields.push({name:"Ferite",value:(wound>0?"+":"")+wound+" ("+wi.label+")",inline:true});
+if(mod)fields.push({name:"Modificatore",value:(mod>0?"+":"")+mod,inline:true});
+fields.push({name:"OCV totale",value:String(ocv),inline:true},{name:"Critico",value:range+" (personaggio "+atk.critC+(atk.critW?" + arma "+atk.critW:"")+")",inline:true},{name:"Tiro d20",value:String(r),inline:true});
+setRes({r,kind,short,ocv});setMk("");setSt("Invio a Discord...");
+mmSendDiscord(mmHookFor(o.id),{username:nm,content:"**"+nm+"** tira per colpire con **"+(atk.name||"—")+"**\n🎲 Tiro **"+r+"** · OCV **"+ocv+"**\n**"+short+"**",embeds:[{color:kind==="crit"?16766720:kind==="fumble"?10038562:3447003,fields}]}).then(x=>setSt(x.ok?"Inviato su Discord ✓":x.reason))},
+btn="px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer border border-slate-300",
+go={width:"100%",padding:"9px",borderRadius:"8px",background:"#f59e0b",color:"#0f172a",fontWeight:800,fontSize:"14px",cursor:"pointer"};
+return i.jsx("div",{onClick:onClose,style:{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.6)",zIndex:60,display:"flex",alignItems:"center",justifyContent:"center",padding:"16px"},children:i.jsxs("div",{onClick:e=>e.stopPropagation(),style:{background:"#fff",color:"#0f172a",borderRadius:"12px",padding:"20px",width:"100%",maxWidth:"380px",maxHeight:"90vh",overflowY:"auto"},className:"space-y-3",children:[
+i.jsx("h4",{className:"text-sm font-bold text-slate-900",children:"Tiro per colpire — "+(atk.name||"")}),
+i.jsxs("p",{className:"text-xs text-slate-600",children:[(o.name||"Personaggio")+": OCV ",i.jsx("strong",{children:atk.ocv}),atk.ocv!==atk.ocvBase?" (scheda "+atk.ocvBase+")":"",". Critico "+range+" (personaggio "+atk.critC+(atk.critW?" + arma "+atk.critW:"")+"), 20 fallimento critico."]}),
+atk.critBad&&i.jsx("p",{style:{fontSize:"11px",color:"#b45309",fontWeight:700},children:"CRI dell'arma «"+atk.critBad+"» non è un numero: non contato."}),
+i.jsxs("div",{className:"flex items-center gap-2 text-xs",children:[i.jsx("span",{className:"font-bold",children:"Modificatore del master:"}),i.jsx(MmDecimal,{decimals:0,value:mod,onChange:setMod,className:"w-14 text-center font-mono font-bold border-b border-dashed border-slate-400 bg-transparent focus:outline-none focus:border-amber-500"}),i.jsx("span",{className:"text-slate-500",children:"(sull'OCV)"})]}),
+wound!==0&&i.jsxs("p",{className:"text-xs",children:["Ferite (",wi.label,"): ",i.jsx("strong",{children:(wound>0?"+":"")+wound})]}),
+i.jsx("button",{onClick:doRoll,style:go,children:"🎲 Tira d20"}),
+res&&i.jsxs("div",{className:"text-center space-y-1",children:[
+i.jsx("div",{style:{fontSize:"44px",fontWeight:900,lineHeight:1,color:res.kind==="crit"?"#b45309":res.kind==="fumble"?"#991b1b":"#0f172a"},children:res.r}),
+i.jsx("div",{style:{fontSize:"16px",fontWeight:900},children:"con OCV "+res.ocv}),
+i.jsx("div",{style:res.kind?{border:"2px solid "+(res.kind==="crit"?"#f59e0b":"#dc2626"),background:res.kind==="crit"?"#fffbeb":"#fef2f2",borderRadius:"8px",padding:"6px",fontWeight:900,fontSize:"15px"}:{fontSize:"12px",color:"#64748b"},children:res.short}),
+onChange&&atk.skill&&res.kind!=="fumble"&&(mk?i.jsxs("div",{style:{display:"flex",flexWrap:"wrap",alignItems:"center",justifyContent:"center",gap:"8px",background:"#ecfdf5",border:"1px solid #10b981",borderRadius:"8px",padding:"6px 8px",fontSize:"12px",fontWeight:700,color:"#065f46"},children:[i.jsx("span",{children:"✔ X su "+atk.skill+" — "+mmMarkText(o,atk.skill)}),i.jsx("button",{onClick:()=>{onChange(mmSkillAddX(o,atk.skill,-1));setMk("")},className:btn,style:{background:"#fff",color:"#0f172a"},children:"Annulla la X"})]}):i.jsx("button",{onClick:()=>{onChange(mmSkillAddX(o,atk.skill,1));setMk("si")},className:btn+" w-full",style:{borderColor:"#10b981",color:"#065f46"},children:"✔ Colpo a segno: segna una X su "+atk.skill})),
+i.jsx("div",{className:"text-[11px] text-slate-500",children:st})]}),
+i.jsx(MmHookField,{charId:o.id,charName:o.name}),i.jsx("button",{onClick:onClose,className:btn+" w-full",children:"Chiudi"})]})})
+}
 const MM_KINDS=[["1m","Arma a una mano"],["2m","Arma a due mani"],["scudo","Scudo"],["speciale","Speciale (mossa, senza stile)"]];
-function MmCombatPage({o,d,onIni}){
+function MmCombatPage({o,d,onIni}){const[atk,setAtk]=Se.useState(null);
 const m=kb(o),db=o.derivedBonuses||{},iniTot=Math.round(((m.ini||0)+(db.ini||0))*10)/10,dex=(o.attributes.DEX||0)+Agp(o.age).DEX,
 cs=ct.filter(s=>s.category==="Combattimento").map(s=>s.name),
 real=o.weapons||[],styles=o.combatStyles||[],active=o.activeStyleId||"",
@@ -551,7 +583,7 @@ specials=rows.filter(isSpec),
 styleIni=s=>Math.round((iniTot+mmN(s.ibv))*10)/10,
 handsOf=list=>list.reduce((a,w)=>a+(kindOf(w)==="2m"?2:1),0),
 calc=w=>{const k=kindOf(w),lot=w.builtin==="lottare",sk=w.skill?mmSkillVal(o,w.skill):null,pen=w.skill&&!mmSkillOwned(o,w.skill)?-2:0,half=sk===null?null:Math.floor((dex+sk+pen+mmN(w.bil))/2),base=lot?m.unarmedDamage:w.damage,bonus=lot?0:m.strDmgBonus*(k==="2m"?2:1);
-return{k,lot,sk,pen,ocv:half===null?null:half+mmN(w.ocvBonus),dcv:half===null?null:half+mmN(w.dfb)+mmN(w.dcvBonus),ini:Math.round((iniTot+mmN(w.ibv))*10)/10,cri:lot?m.critici:w.cri,base,bonus,tot:lot?String(base):mmAddDmg(base,bonus)}},
+return{k,lot,sk,pen,ocv:half===null?null:half+mmN(w.ocvBonus),dcv:half===null?null:half+mmN(w.dfb)+mmN(w.dcvBonus),ini:Math.round((iniTot+mmN(w.ibv))*10)/10,cri:lot?(m.critici||0)+(db.critici||0):w.cri,critC:(m.critici||0)+(db.critici||0),critW:lot?0:mmCritExtra(w.cri),base,bonus,tot:lot?String(base):mmAddDmg(base,bonus)}},
 inp="w-full border border-slate-300 rounded px-1 py-0.5 text-xs text-center text-slate-900 bg-white focus:outline-none focus:border-amber-500",
 lbl="block text-[9px] uppercase tracking-wider text-slate-500 text-center",
 box="border border-slate-300 rounded p-2 text-center",
@@ -569,7 +601,7 @@ i.jsx("select",{value:c.k,onChange:e=>upd(w.id,{kind:e.target.value,...(e.target
 !c.lot&&i.jsx("button",{onClick:()=>rmRow(w),className:"text-slate-400 hover:text-red-400 cursor-pointer text-xs",title:"Rimuovi",children:"✕"})]}),
 i.jsxs("div",{className:"grid grid-cols-3 sm:grid-cols-5 gap-1.5",children:[field(w,"mv","MV"),field(w,"bil","BIL"),spec&&field(w,"ibv","IBV"),field(w,"dfb","DFB"),field(w,"cri","CRI",c.lot?String(c.cri):void 0),field(w,"damage","Danni base",c.lot?String(c.base):void 0),field(w,"type","Range / StM"),field(w,"notes","Altro / Bonus"),field(w,"ocvBonus","Mod. OCV"),field(w,"dcvBonus","Mod. DCV")]}),
 i.jsxs("div",{className:"grid gap-1.5 "+(spec?"grid-cols-2 sm:grid-cols-4":"grid-cols-3"),children:[
-i.jsxs("div",{className:box+" bg-slate-50",children:[i.jsx("div",{className:lbl,children:"OCV"}),i.jsx("div",{className:"font-mono font-black text-lg text-slate-900",children:c.ocv===null?"—":c.ocv})]}),
+i.jsxs("div",{className:box+" bg-slate-50",children:[i.jsx("div",{className:lbl,children:"OCV"}),i.jsxs("div",{className:"flex items-center justify-center gap-1",children:[i.jsx("span",{className:"font-mono font-black text-lg text-slate-900",children:c.ocv===null?"—":c.ocv}),c.ocv!==null&&i.jsx("button",{onClick:()=>setAtk({name:w.name||w.skill||"",skill:w.skill,ocv:c.ocv,ocvBase:c.ocv,critC:c.critC,critW:c.critW,critBad:!c.lot&&mmCritBad(w.cri)?String(w.cri):""}),className:"px-1.5 py-0.5 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 text-[10px] font-extrabold cursor-pointer",title:"Tiro per colpire (d20)",children:"🎲 Colpisci"})]})]}),
 i.jsxs("div",{className:box+" bg-slate-50",children:[i.jsx("div",{className:lbl,children:"DCV"}),i.jsx("div",{className:"font-mono font-black text-lg text-slate-900",children:c.dcv===null?"—":c.dcv})]}),
 spec&&i.jsxs("div",{className:box+yel,children:[i.jsx("div",{className:lbl+" text-amber-900",children:"Iniziativa"}),i.jsxs("div",{className:"flex items-center justify-center gap-1",children:[i.jsx("span",{className:"font-mono font-black text-lg text-amber-950",children:c.ini}),iniBtn(w.name||w.skill||"",c.ini)]})]}),
 i.jsxs("div",{className:box+yel,children:[i.jsx("div",{className:lbl+" text-amber-900",children:"Danni totali"}),i.jsx("div",{className:"font-mono font-black text-base text-amber-950",title:c.lot?"Danni a mani nude dalla Forza":"Danni base + bonus Forza ("+(c.bonus>=0?"+":"")+c.bonus+")",children:c.tot})]})]})
@@ -591,11 +623,11 @@ cur=styles.find(s=>s.id===active);
 return i.jsxs("div",{className:"bg-white text-slate-950 border border-slate-300 rounded-xl shadow-xl p-6 space-y-4",children:[
 i.jsx("h4",{className:"text-sm font-bold text-slate-900 pb-2 border-b-2 border-slate-900",children:"Combattimento"}),
 i.jsxs("div",{className:"grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs text-center",children:[
-i.jsxs("div",{className:box,children:[i.jsx("div",{className:lbl,children:"Critici base"}),i.jsx("div",{className:"font-mono font-bold text-slate-900",children:m.critici})]}),
+i.jsxs("div",{className:box,children:[i.jsx("div",{className:lbl,children:"Critici base"}),i.jsx("div",{className:"font-mono font-bold text-slate-900",children:(m.critici||0)+(db.critici||0)})]}),
 i.jsxs("div",{className:box+yel,title:"Dalla scheda (derivata + bonus), non modificabile qui",children:[i.jsx("div",{className:lbl+" text-amber-900",children:"INI base"}),i.jsx("div",{className:"font-mono font-bold text-amber-950",children:iniTot})]}),
 i.jsxs("div",{className:box,children:[i.jsx("div",{className:lbl,children:"Bonus danno (FOR)"}),i.jsx("div",{className:"font-mono font-bold text-slate-900",children:m.strDmgBonus>0?"+"+m.strDmgBonus:m.strDmgBonus})]}),
 i.jsxs("div",{className:box,children:[i.jsx("div",{className:lbl,children:"Danni a mani nude"}),i.jsx("div",{className:"font-mono font-bold text-slate-900",children:String(m.unarmedDamage)})]})]}),
-i.jsx("p",{className:"text-[10px] text-slate-500",children:"OCV = (DEX + skill + BIL) / 2 per difetto. DCV = lo stesso + DFB. Ogni stile di combattimento (per esempio arma e scudo) ha una sola iniziativa: INI base + IBV dello stile. I danni restano separati per riga: danni base + bonus FOR (doppio per le armi a due mani)."}),
+i.jsx("p",{className:"text-[10px] text-slate-500",children:"OCV = (DEX + skill + BIL) / 2 per difetto. DCV = lo stesso + DFB. Ogni stile di combattimento (per esempio arma e scudo) ha una sola iniziativa: INI base + IBV dello stile. I danni restano separati per riga: danni base + bonus FOR (doppio per le armi a due mani). CRI dell'arma = critici in più rispetto a quelli del personaggio: con «🎲 Colpisci» il colpo è critico con un d20 da 1 alla somma dei due."}),atk&&i.jsx(MmAttackModal,{character:o,atk,onChange:d,onClose:()=>setAtk(null)},"atk"),
 cur&&i.jsxs("div",{className:"text-xs text-slate-700",children:["Stile in uso: ",i.jsx("strong",{children:cur.name||"senza nome"})," · iniziativa ",i.jsx("strong",{children:styleIni(cur)})]}),
 i.jsxs("div",{className:"space-y-2",children:[i.jsx("h5",{className:"text-xs font-bold uppercase tracking-wider text-slate-700 border-b border-slate-300 pb-1",children:"Stili di combattimento"}),
 styles.length===0&&i.jsx("p",{className:"text-[11px] text-slate-500",children:"Crea uno stile (per esempio «Spada e scudo» o «Due armi») e metti dentro le sue righe: ogni stile ha una sola iniziativa."}),
@@ -816,10 +848,11 @@ dmgShow=lot?(fxd?(una.indexOf("(")>=0?una+" "+mmDelta(fxd):mmAddDmg(una,fxd)):un
 dmgParts=mmFxParts(list,["dmg"]),dmgVia=bon-bon0,dmgUnaCh=lot&&String(m0.unarmedDamage)!==una,
 dmgSum=mmR2(dmgVia+fxd),
 dmg={key:w.id+"dmg",add:"dmg",label:"Danni",base:0,total:dmgSum,show:dmgShow,baseShow:dmgBase,parts:dmgParts,via:dmgVia,ing:0,viaText:"Bonus Forza modificato",note:dmgUnaCh?"Il danno a mani nude cambia con la Forza modificata.":"",dir:dmgShow===dmgBase?"":dmgSum<0?"down":dmgSum>0||dmgUnaCh&&m.bSTR>=m0.bSTR?"up":"down"},
-cRaw=lot?String(m0.critici):String(w.cri==null?"":w.cri).trim(),cNum=/^-?\d+$/.test(cRaw),cParts=cRaw?mmFxParts(list,["critici"]):[],cFx=cRaw?mmFxSum(list,["critici"]):0,
-cri=cNum?S({key:w.id+"cri",add:"critici",label:"CRI",base:parseInt(cRaw,10),eff:parseInt(cRaw,10)+(lot?m.critici-m0.critici:0),keys:["critici"]}):{key:w.id+"cri",add:"critici",label:"CRI",base:0,total:cFx,show:(cRaw||"—")+(cFx?" "+mmDelta(cFx):""),baseShow:cRaw||"—",parts:cParts,via:0,ing:0},
+cc0=(m0.critici||0)+(db.critici||0),cc1=(m.critici||0)+(db.critici||0),cRaw=lot?"":String(w.cri==null?"":w.cri).trim(),wx=mmCritExtra(cRaw),cBad=mmCritBad(cRaw),
+cri=S({key:w.id+"cri",add:"critici",label:"CRI",base:cc0+wx,eff:cc1+wx,keys:["critici"],detail:[["Critici del personaggio",mmFmt(cc0)],...(cRaw?[["Arma",cBad?"«"+cRaw+"» non è un numero: non contato":"+"+wx]]:[])],note:"Critico con un d20 da 1 a CRI."}),
 ownIni=isSpec(w)||(!(selStyle&&w.styleId===selStyle.id)&&mmN(w.ibv)!==0)?iniStat(w.id+"ini","INI",w.ibv):null;
-return{w,lot,pen,sk:sk===null?null:sk+skFx,cells:[cv("ocv","OCV",mmN(w.ocvBonus)),cv("dcv","DCV",mmN(w.dfb)+mmN(w.dcvBonus)),dmg,cri],ownIni}},
+const ocvS=cv("ocv","OCV",mmN(w.ocvBonus)),atk=sk===null?null:{name:w.name||w.skill||"",skill:w.skill,ocv:ocvS.total,ocvBase:ocvS.base,critC:cri.total-wx,critW:wx,critBad:cBad?cRaw:""};
+return{w,lot,pen,atk,sk:sk===null?null:sk+skFx,cells:[ocvS,cv("dcv","DCV",mmN(w.dfb)+mmN(w.dcvBonus)),dmg,cri],ownIni}},
 cRows=shownRows.map(combat),
 // ---- Movimento ----
 moves=[der("mov","Movimento",{ing:ing.other,min:0}),der("salto","Salto",{min:0}),S({key:"solleva",add:"solleva",label:"Sollevare",base:m0.solleva||0,eff:m.solleva||0,keys:["solleva"],min:0}),S({key:"sposta",add:"sposta",label:"Spostare",base:m0.sposta||0,eff:m.sposta||0,keys:["sposta"],min:0})],
@@ -915,9 +948,10 @@ i.jsx("div",{className:"mms-g",children:zones.map(s=>tile(s))})]})),
 card("Combattimento",i.jsxs("div",{style:{display:"flex",flexDirection:"column",gap:"6px"},children:[
 styles.length>1&&i.jsx("div",{style:{display:"flex",flexWrap:"wrap",gap:"6px"},children:styles.map(s=>i.jsx("button",{"data-nav":"1",className:"mms-b"+(s.id===selId?" on":""),onClick:()=>setSty(s.id),children:(s.name||"Stile senza nome")+(s.id===o.activeStyleId?" ●":"")},s.id))}),
 i.jsxs("div",{className:"mms-g",children:[tile(mainIni,{label:"Iniziativa"+(selStyle&&selStyle.name?" · "+selStyle.name:""),dice:()=>setRoll({t:"ini",cfg:{ini:!0,label:(selStyle&&selStyle.name)||"",title:"Iniziativa",base:mainIni.base,fx:mmR2(mainIni.total-mainIni.base),fxLabel:mmFxWhy(mainIni)}})}),tile(critG)]}),
+i.jsx("div",{className:"mms-note",children:"Il 🎲 sotto l'OCV è il tiro per colpire."}),
 cRows.map(r=>i.jsxs("div",{className:"mms-row",children:[
 i.jsxs("div",{style:{fontSize:"12px"},children:[i.jsx("strong",{children:r.w.name||r.w.skill||"Senza nome"}),r.w.skill&&i.jsx("span",{className:"mms-note",children:" · "+r.w.skill+" "+r.sk+(r.pen?" · non posseduta −2":"")})]}),
-i.jsxs("div",{className:"mms-g five",children:[r.cells.map(s=>tile(s)),r.ownIni&&tile(r.ownIni,{dice:()=>setRoll({t:"ini",cfg:{ini:!0,label:r.w.name||r.w.skill||"",title:"Iniziativa",base:r.ownIni.base,fx:mmR2(r.ownIni.total-r.ownIni.base),fxLabel:mmFxWhy(r.ownIni)}})})]})]},r.w.id))]})),
+i.jsxs("div",{className:"mms-g five",children:[r.cells.map((s,ix)=>tile(s,ix===0&&r.atk?{dice:()=>setRoll({t:"atk",atk:r.atk})}:{})),r.ownIni&&tile(r.ownIni,{dice:()=>setRoll({t:"ini",cfg:{ini:!0,label:r.w.name||r.w.skill||"",title:"Iniziativa",base:r.ownIni.base,fx:mmR2(r.ownIni.total-r.ownIni.base),fxLabel:mmFxWhy(r.ownIni)}})})]})]},r.w.id))]})),
 card("Movimento",i.jsx("div",{className:"mms-g",children:moves.map(s=>tile(s))})),
 i.jsxs("div",{className:"mms-card magic",children:[
 i.jsx("div",{className:"mms-mh",children:"🔮 Magia e poteri ✨"}),
@@ -943,6 +977,7 @@ info.markName&&i.jsxs("div",{style:{display:"flex",alignItems:"center",gap:"8px"
 i.jsxs("div",{style:{display:"flex",gap:"8px"},children:[i.jsx("button",{className:"mms-b go",style:{flex:1},onClick:()=>{openDlg({mods:[{k:info.add,v:""}]});setInfo(null)},children:"＋ Bonus / malus qui"}),i.jsx("button",{"data-nav":"1",className:"mms-b",onClick:()=>setInfo(null),children:"Chiudi"})]})]})}),
 dlg&&i.jsx(MmFxDialog,{init:dlg,groups,people,onClose:()=>setDlg(null),onSave:saveEffect},dlg.id||"new"),
 ask&&i.jsx("div",{className:"mms-ov",onClick:()=>setAsk(null),children:i.jsxs("div",{className:"mms-dlg",style:{maxWidth:"340px"},onClick:e=>e.stopPropagation(),children:[i.jsx("strong",{style:{fontSize:"14px"},children:"Togliere «"+ask.name+"»?"}),i.jsx("div",{children:(ask.off?"È attivo solo su: ":"È attivo su di te e su: ")+ask.to.map(x=>x.name).join(", ")+"."}),i.jsx("button",{className:"mms-b go",onClick:()=>rmEveryone(ask),children:"Togli a tutti"}),!ask.off&&i.jsx("button",{className:"mms-b",onClick:()=>{saveFx(ownNow().map(x=>x.id===ask.id?{...x,off:!0}:x));setAsk(null)},children:"Toglilo solo a me"}),i.jsx("button",{className:"mms-b",onClick:()=>setAsk(null),children:"Annulla"})]})}),
+roll&&roll.t==="atk"&&i.jsx(MmAttackModal,{character:o,atk:roll.atk,onChange:d,onClose:close}),
 roll&&roll.t==="gen"&&i.jsx(MmRollModal,{character:o,cfg:roll.cfg,onClose:close}),
 roll&&roll.t==="ini"&&i.jsx(MmIniModal,{character:o,cfg:roll.cfg,onClose:close}),
 roll&&roll.t==="skill"&&i.jsx(SkillRollModal,{character:o,skill:roll.skill,onChange:d,onClose:close}),
