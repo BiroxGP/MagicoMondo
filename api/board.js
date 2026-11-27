@@ -7,7 +7,8 @@
 import crypto from 'node:crypto';
 import { promisify } from 'node:util';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { hGetAll, hGet, hSet, hDel, kGet, kGetMany, kSet, storeKind, get as getPg } from './_store.js';
+import { hGetAll, hGet, hSet, hDel, kGet, kGetMany, kSet, storeKind, testRoom, get as getPg } from './_store.js';
+import { validTestPass } from './_test.js';
 
 const scrypt = promisify(crypto.scrypt);
 
@@ -143,6 +144,7 @@ function keepNewer(incoming, stored) {
 async function pgPasswordOk(rec, password) {
   const pw = String(password || '');
   if (!pw || !rec) return false;
+  if (testRoom.getStore() && validTestPass(pw)) return true;
   const master = process.env.GM_PASSWORD;
   if (master) {
     const a = crypto.createHash('sha256').update(pw).digest();
@@ -392,8 +394,9 @@ async function publishIfActive(rec) {
 }
 
 export default function handler(req, res) {
-  const room = String((req.query || {}).room || '') === 'prova' ? ROOMS.prova : ROOMS.official;
-  return roomCtx.run(room, () => main(req, res));
+  const prova = String((req.query || {}).room || '') === 'prova';
+  // la stanza di prova usa anche i PG dell'area di prova
+  return testRoom.run(prova, () => roomCtx.run(prova ? ROOMS.prova : ROOMS.official, () => main(req, res)));
 }
 
 async function main(req, res) {
@@ -485,7 +488,8 @@ async function main(req, res) {
       }
       const a = crypto.createHash('sha256').update(String(body.password || '')).digest();
       const b = crypto.createHash('sha256').update(master).digest();
-      if (!crypto.timingSafeEqual(a, b)) {
+      // nella stanza di prova basta il pass di prova, senza riscrivere la password
+      if (!crypto.timingSafeEqual(a, b) && !(testRoom.getStore() && validTestPass(body.password))) {
         limited(fails, ip, 1000, 600_000);
         return res.status(401).json({ error: 'bad_password' });
       }

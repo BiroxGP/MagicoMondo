@@ -4,9 +4,12 @@
 //  - un giocatore (campo "player") può avere un solo PG ufficiale
 //  - con la propria password un PG può mandare ad altri PG effetti temporanei (bonus/malus): stanno in un
 //    archivio a parte, non modificano le schede, e chi li riceve può toglierli
+//  - area di prova (?room=prova): stessi comandi su un archivio separato; serve il pass di prova
+//    (intestazione x-mm-test), che si ottiene con la password master e vale anche come password dei PG di prova
 import crypto from 'node:crypto';
 import { promisify } from 'node:util';
-import { getAll, get, put, del, hGetAll, hSet, hDel, storeKind } from './_store.js';
+import { getAll, get, put, del, hGetAll, hSet, hDel, storeKind, testRoom } from './_store.js';
+import { isMaster, makeTestPass, validTestPass } from './_test.js';
 
 const scrypt = promisify(crypto.scrypt);
 const MAX_BYTES = 900_000;
@@ -39,14 +42,11 @@ async function hashPassword(password) {
   return { salt, hash: key.toString('hex') };
 }
 
+const inTest = () => !!testRoom.getStore();
+
 async function checkPassword(rec, password) {
-  const master = process.env.GM_PASSWORD;
   const pw = String(password || '');
-  if (master) {
-    const a = crypto.createHash('sha256').update(pw).digest();
-    const b = crypto.createHash('sha256').update(master).digest();
-    if (crypto.timingSafeEqual(a, b)) return 'master';
-  }
+  if (isMaster(pw) || (inTest() && validTestPass(pw))) return 'master';
   if (!rec || !rec.salt || !pw) return null;
   const key = await scrypt(pw, rec.salt, 32);
   const stored = Buffer.from(rec.hash, 'hex');
@@ -88,7 +88,7 @@ function playerTaken(all, player, exceptId) {
 
 // ---- effetti temporanei ricevuti da altri PG ----
 // Un campo per effetto (mittente~id): due invii contemporanei non si sovrascrivono.
-const fxKey = (id) => 'mm:pgfx:' + id;
+const fxKey = (id) => (inTest() ? 'mm:prova_pgfx:' : 'mm:pgfx:') + id;
 const FXID_RE = /^[A-Za-z0-9_-]{1,40}$/;
 const MAX_FX = 40;
 const cut = (s, n) => String(s || '').trim().slice(0, n);
@@ -118,7 +118,11 @@ async function readFx(id) {
 const idList = (value, self) =>
   [...new Set(Array.isArray(value) ? value.map(String) : [])].filter((x) => x !== self && ID_RE.test(x)).slice(0, MAX_FX);
 
-export default async function handler(req, res) {
+export default function handler(req, res) {
+  return testRoom.run(String((req.query || {}).room || '') === 'prova', () => main(req, res));
+}
+
+async function main(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || 'unknown';
   if (limited(hits, ip, 240, 60_000)) return res.status(429).json({ error: 'rate_limited' });
@@ -151,7 +155,20 @@ export default async function handler(req, res) {
   }
 
   try {
-    // ---- lettura (libera) ----
+    // ---- ingresso nell'area di prova ----
+    if (method === 'POST' && body.action === 'testLogin') {
+      if (!process.env.GM_PASSWORD) return res.status(503).json({ error: 'no_master' });
+      if (failedTooOften(ip)) return res.status(429).json({ error: 'rate_limited' });
+      if (!isMaster(body.password)) {
+        noteFailure(ip);
+        return res.status(401).json({ error: 'bad_password' });
+      }
+      return res.status(200).json({ pass: makeTestPass() });
+    }
+    // nell'area di prova anche la lettura richiede il pass
+    if (inTest() && !validTestPass(req.headers['x-mm-test'])) return res.status(401).json({ error: 'test_auth' });
+
+    // ---- lettura (libera per i PG ufficiali) ----
     if (method === 'GET') {
       if (query.fx) {
         if (!ID_RE.test(query.fx)) return res.status(404).json({ error: 'not_found' });
@@ -170,6 +187,33 @@ export default async function handler(req, res) {
     }
 
     const action = body.action;
+
+    // ---- area di prova: crea un PG (senza password, anche più di uno per giocatore) ----
+    if (method === 'POST' && action === 'create' && inTest()) {
+      const newId = 'pgt_' + crypto.randomBytes(6).toString('hex');
+      const player = String((body.character && body.character.player) || '').trim() || 'Prova';
+      const character = cleanCharacter({ ...body.character, player }, newId);
+      if (!character) return res.status(400).json({ error: 'bad_request' });
+      if (JSON.stringify(character).length > MAX_BYTES) return res.status(413).json({ error: 'too_large' });
+      const now = Date.now();
+      await put(newId, { character, rev: 1, createdAt: now, updatedAt: now });
+      return res.status(200).json({ id: newId, rev: 1 });
+    }
+
+    // ---- area di prova: copia un PG ufficiale (stesso identificativo; l'originale viene solo letto) ----
+    if (method === 'POST' && action === 'testCopy' && inTest()) {
+      const source = String(body.sourceId || '');
+      if (!ID_RE.test(source)) return res.status(404).json({ error: 'not_found' });
+      const original = await testRoom.run(false, () => get(source));
+      if (!original) return res.status(404).json({ error: 'not_found' });
+      const previous = await get(source);
+      const rev = previous ? (previous.rev || 1) + 1 : 1;
+      const now = Date.now();
+      const character = cleanCharacter(original.character, source);
+      if (!character) return res.status(400).json({ error: 'bad_request' });
+      await put(source, { character, rev, createdAt: now, updatedAt: now });
+      return res.status(200).json({ id: source, rev });
+    }
 
     // ---- rendere ufficiale un PG ----
     if (method === 'POST' && action === 'create') {
@@ -224,7 +268,7 @@ export default async function handler(req, res) {
       if (JSON.stringify(character).length > MAX_BYTES) return res.status(413).json({ error: 'too_large' });
       // il controllo del giocatore doppio serve solo se il nome giocatore è cambiato: evita di leggere
       // tutti i PG a ogni salvataggio (più lento e più comandi sul database)
-      if (normPlayer(character.player) !== normPlayer(rec.character && rec.character.player)) {
+      if (!inTest() && normPlayer(character.player) !== normPlayer(rec.character && rec.character.player)) {
         const all = await getAll();
         const taken = playerTaken(all, character.player, String(id));
         if (taken) return res.status(409).json({ error: 'player_taken', id: taken.id, name: taken.name });

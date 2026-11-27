@@ -4,8 +4,11 @@
 // In locale (npm run dev) ripiega su un file .data/store.json, solo per provare.
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
-const PG_KEY = 'mm:pgs';
+// Dentro testRoom.run(true, ...) i PG letti e scritti sono quelli dell'area di prova, in un archivio separato.
+export const testRoom = new AsyncLocalStorage();
+const pgKey = () => (testRoom.getStore() ? 'mm:prova_pgs' : 'mm:pgs');
 const REDIS_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
 const REDIS_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
 const FILE = path.join(process.cwd(), '.data', 'store.json');
@@ -108,7 +111,7 @@ export async function kSet(key, value) {
 
 // ---- PG ufficiali (record JSON) ----
 export async function getAll() {
-  const raw = await hGetAll(PG_KEY);
+  const raw = await hGetAll(pgKey());
   const all = {};
   for (const [id, value] of Object.entries(raw)) {
     try {
@@ -121,14 +124,14 @@ export async function getAll() {
 }
 
 export async function get(id) {
-  const raw = await hGet(PG_KEY, id);
+  const raw = await hGet(pgKey(), id);
   return raw ? JSON.parse(raw) : null;
 }
 
 export async function put(id, record) {
-  await hSet(PG_KEY, id, JSON.stringify(record));
+  await hSet(pgKey(), id, JSON.stringify(record));
 }
 
 export async function del(id) {
-  await hDel(PG_KEY, id);
+  await hDel(pgKey(), id);
 }
