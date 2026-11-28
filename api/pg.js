@@ -95,11 +95,15 @@ const cut = (s, n) => String(s || '').trim().slice(0, n);
 
 function cleanEffect(e) {
   if (!e || !FXID_RE.test(String(e.id || ''))) return null;
+  // una cura: vite da togliere ai danni del bersaglio (la applica la sua scheda)
+  const heal = Math.floor(Number(e.heal));
+  if (heal > 0 && heal <= 99) return { id: String(e.id), name: cut(e.name, 60) || 'Cura', dur: '', mods: [], heal };
   const mods = (Array.isArray(e.mods) ? e.mods : [])
     .slice(0, 30)
     .map((m) => ({ k: cut(m && m.k, 90), v: Math.round(Number(m && m.v) * 100) / 100 }))
     .filter((m) => m.k && Number.isFinite(m.v) && m.v !== 0 && Math.abs(m.v) <= 999);
-  if (!mods.length) return null;
+  // senza numeri vale solo per gli effetti di un incantesimo (uno stato: nome e durata)
+  if (!mods.length && e.free !== true) return null;
   return { id: String(e.id), name: cut(e.name, 60) || 'Effetto', dur: cut(e.dur, 60), mods };
 }
 
